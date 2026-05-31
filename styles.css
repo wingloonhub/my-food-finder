@@ -186,11 +186,30 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 }
 
 .field-label { display: block; color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
+.modal-card select {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  padding: 12px; border-radius: 10px; outline: none;
+}
+.modal-card select:focus { border-color: var(--accent); }
+.settings-h { font-size: 1rem; margin: 4px 0 0; }
+.chip-edit-list { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-edit {
+  display: inline-flex; align-items: center; gap: 8px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 6px 8px 6px 14px; font-size: .88rem;
+}
+.chip-edit button {
+  background: var(--border); color: var(--text); border: none; border-radius: 50%;
+  width: 20px; height: 20px; line-height: 1; cursor: pointer; font-size: .9rem;
+}
+.chip-edit button:hover { background: var(--red); color: #fff; }
 .search-row { display: flex; gap: 8px; }
 .search-row input { flex: 1; }
 .hint { color: var(--muted); font-size: .82rem; line-height: 1.5; margin: 12px 0; }
 .hint code { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
 .search-status { color: var(--muted); font-size: .88rem; margin: 12px 0; min-height: 1.2em; }
+.search-status strong { color: var(--accent-2); }
+.manual-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: .88rem; }
+.manual-row span { flex: 1; }
 .search-results { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .search-result {
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
@@ -206,6 +225,23 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 .form-grid label.full { grid-column: 1 / -1; }
 .auto-tag { background: var(--surface-2); color: var(--accent-2); font-size: .66rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; }
 
+/* Per-day opening hours editor */
+.hours-block { margin-top: 18px; }
+.hours-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: .85rem; margin-bottom: 10px; }
+.hours-cap .link-btn { font-size: .8rem; padding: 0; white-space: nowrap; }
+.hours-editor { display: flex; flex-direction: column; gap: 8px; }
+.he-row { display: flex; align-items: center; gap: 10px; }
+.he-day { display: flex; align-items: center; gap: 8px; flex: 0 0 112px; color: var(--text); font-size: .9rem; cursor: pointer; }
+.he-day input { width: 18px; height: 18px; accent-color: var(--accent); }
+.he-times { display: flex; align-items: center; gap: 6px; flex: 1; color: var(--muted); }
+.he-times input[type="time"] {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px; border-radius: 8px; outline: none; flex: 1; min-width: 0;
+}
+.he-times input[type="time"]:focus { border-color: var(--accent); }
+.he-row.closed .he-times { opacity: .4; }
+.he-closed-tag { flex: 1; color: var(--muted); font-size: .85rem; }
+
 /* ---------------- Detail ---------------- */
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .detail-name { font-size: 1.35rem; font-weight: 700; margin: 0; }
@@ -220,6 +256,11 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 .crowd-med { background: rgba(240,180,41,.15); color: var(--amber); }
 .crowd-high { background: rgba(240,85,107,.15); color: var(--red); }
 .dish-list { margin: 0; padding-left: 18px; }
+.hours-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 18px; }
+.hours-day { color: var(--muted); }
+.hours-time { color: var(--text); }
+.hours-closed { color: var(--muted); }
+.hours-today { color: var(--accent-2); font-weight: 700; }
 .detail-actions { display: flex; gap: 10px; margin-top: 22px; }
 .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
 .map-btn { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent-2); padding: 10px 14px; border-radius: 10px; text-decoration: none; }

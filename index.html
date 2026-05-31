@@ -51,6 +51,7 @@
       </div>
       <div class="topbar-right">
         <span id="user-email" class="user-email"></span>
+        <button id="btn-settings" class="btn-ghost" type="button" title="Settings" aria-label="Settings">⚙</button>
         <button id="btn-logout" class="btn-ghost" type="button">Log out</button>
       </div>
     </header>
@@ -76,6 +77,23 @@
 
   </main>
 
+  <!-- ===================== SETTINGS MODAL ===================== -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Settings</h2>
+      <h3 class="settings-h">Cuisine list</h3>
+      <p class="hint">These are the choices in the cuisine dropdown when you add or edit a restaurant.</p>
+      <ul id="cuisine-list" class="chip-edit-list"></ul>
+      <div class="search-row">
+        <input id="cuisine-new" type="text" placeholder="Add a cuisine, e.g. Vietnamese" />
+        <button id="cuisine-add" class="btn-primary" type="button">Add</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" data-close-settings type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== ADD COUNTRY MODAL ===================== -->
   <div id="country-modal" class="modal hidden">
     <div class="modal-card">
@@ -91,7 +109,7 @@
   <!-- ===================== ADD RESTAURANT MODAL ===================== -->
   <div id="add-modal" class="modal hidden">
     <div class="modal-card modal-card-wide">
-      <h2>Add restaurant</h2>
+      <h2 id="add-title">Add restaurant</h2>
 
       <!-- Step 1: search -->
       <div id="add-step-search">
@@ -100,26 +118,36 @@
           <input id="search-name" type="text" placeholder="e.g. Village Park Restaurant" />
           <button id="search-go" class="btn-primary" type="button">Search</button>
         </div>
-        <p class="hint">Searching in <strong id="search-country-label">Malaysia</strong>. We’ll pull the details automatically.</p>
+        <p class="hint">Searching in <strong id="search-country-label">Malaysia</strong> using a free map database — most places are listed, but not every one. If yours isn’t found, just add it by hand.</p>
         <div id="search-status" class="search-status"></div>
         <ul id="search-results" class="search-results"></ul>
-        <button id="manual-entry" class="link-btn" type="button">Can’t find it? Enter details manually</button>
+        <div class="manual-row">
+          <span>Not in the list?</span>
+          <button id="manual-entry" class="btn-ghost" type="button">Add it manually</button>
+        </div>
       </div>
 
       <!-- Step 2: confirm / edit -->
       <div id="add-step-edit" class="hidden">
         <div class="form-grid">
           <label>Name<input id="f-name" type="text" /></label>
-          <label>Cuisine<input id="f-cuisine" type="text" placeholder="e.g. Malaysian, Chinese" /></label>
+          <label>Cuisine<select id="f-cuisine"></select></label>
           <label class="full">State / district <span class="auto-tag">auto-filled</span><input id="f-district" type="text" list="district-options" placeholder="e.g. Kuala Lumpur" /><datalist id="district-options"></datalist></label>
           <label class="full">Address<input id="f-address" type="text" /></label>
-          <label>Opening hours<input id="f-hours" type="text" placeholder="e.g. Mo-Su 08:00-22:00" /></label>
           <label>Contact no.<input id="f-phone" type="text" /></label>
           <label>Latitude<input id="f-lat" type="text" inputmode="decimal" /></label>
           <label>Longitude<input id="f-lng" type="text" inputmode="decimal" /></label>
           <label class="full">Dish recommendations (comma separated)<input id="f-dishes" type="text" placeholder="e.g. Nasi Lemak Ayam, Teh Tarik" /></label>
         </div>
-        <p class="hint">Opening-hours format: weekday codes <code>Mo Tu We Th Fr Sa Su</code>, ranges with <code>-</code>, times like <code>08:00-22:00</code>. Use <code>24/7</code> for always open. Leave blank if unknown.</p>
+
+        <div class="hours-block">
+          <div class="hours-cap">
+            <span>Opening hours <span class="auto-tag">auto-filled if found</span></span>
+            <button id="hours-copy" class="link-btn" type="button">Copy Monday to all days</button>
+          </div>
+          <div id="hours-editor" class="hours-editor"></div>
+          <p class="hint">Tick the days it’s open and set the times. Unticked days count as closed. The Open/Closed status is worked out from this.</p>
+        </div>
         <div class="modal-actions">
           <button class="btn-ghost" data-close-add type="button">Cancel</button>
           <button id="save-restaurant" class="btn-primary" type="button">Save</button>

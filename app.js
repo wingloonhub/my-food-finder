@@ -46,9 +46,12 @@ const state = {
   activeCountry: "Malaysia",
   activeDistrict: "",   // "" = all areas in the active country
   cuisine: "",
+  cuisines: [],         // managed cuisine list for the dropdown (Settings)
   openOnly: false,      // show only restaurants open right now
+  editingId: null,      // id of the restaurant being edited (null = adding new)
   restaurants: [],      // all restaurants for the user
   userPos: null,        // {lat, lng}
+  locDenied: false,     // true once the user blocks the location prompt
   unsub: null,
 };
 
@@ -60,13 +63,22 @@ const show = (el) => el.classList.remove("hidden");
 const hide = (el) => el.classList.add("hidden");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Capitalise the first letter of each word (leaves the rest as typed, so
+// "mcdonald's" -> "Mcdonald's", "village park" -> "Village Park").
+const titleCase = (s) => String(s ?? "").replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1));
 
 // ---------------------------------------------------------------------------
 // STORAGE ADAPTER — Firebase in production, localStorage in demo mode.
 // Both expose the same interface so the rest of the app doesn't care which.
 // ---------------------------------------------------------------------------
 const LS_COUNTRIES = "rt_demo_countries";
+const LS_CUISINES = "rt_demo_cuisines";
 const LS_RESTAURANTS = "rt_demo_restaurants";
+
+const DEFAULT_CUISINES = [
+  "Malaysian", "Malay", "Chinese", "Indian", "Mamak / Indian", "Japanese",
+  "Korean", "Thai", "Western", "Cafe", "Seafood", "Vegetarian", "Fast Food", "Dessert",
+];
 
 function firebaseStore() {
   return {
@@ -82,12 +94,22 @@ function firebaseStore() {
     async setCountries(arr) {
       await setDoc(doc(db, "users", state.uid), { countries: arr }, { merge: true });
     },
+    async getCuisines() {
+      const s = await getDoc(doc(db, "users", state.uid));
+      return s.exists() && Array.isArray(s.data().cuisines) ? s.data().cuisines : null;
+    },
+    async setCuisines(arr) {
+      await setDoc(doc(db, "users", state.uid), { cuisines: arr }, { merge: true });
+    },
     subscribe(cb) {
       const col = collection(db, "users", state.uid, "restaurants");
       return onSnapshot(col, (qs) => cb(qs.docs.map((d) => ({ id: d.id, ...d.data() }))));
     },
     async add(data) {
       await addDoc(collection(db, "users", state.uid, "restaurants"), { ...data, createdAt: serverTimestamp() });
+    },
+    async update(id, data) {
+      await setDoc(doc(db, "users", state.uid, "restaurants", id), data, { merge: true });
     },
     async remove(id) { await deleteDoc(doc(db, "users", state.uid, "restaurants", id)); },
   };
@@ -102,12 +124,15 @@ function demoStore() {
     initAuth(onChange) { seedDemoData(); onChange({ uid: "demo", email: "Demo mode" }); },
     async getCountries() { try { return JSON.parse(localStorage.getItem(LS_COUNTRIES)); } catch { return null; } },
     async setCountries(arr) { localStorage.setItem(LS_COUNTRIES, JSON.stringify(arr)); },
+    async getCuisines() { try { return JSON.parse(localStorage.getItem(LS_CUISINES)); } catch { return null; } },
+    async setCuisines(arr) { localStorage.setItem(LS_CUISINES, JSON.stringify(arr)); },
     subscribe(c) { cb = c; cb(read()); return () => { cb = null; }; },
     async add(data) {
       const arr = read();
       arr.push({ id: "d" + Date.now() + Math.random().toString(36).slice(2, 6), ...data });
       write(arr);
     },
+    async update(id, data) { write(read().map((r) => (r.id === id ? { ...r, ...data } : r))); },
     async remove(id) { write(read().filter((r) => r.id !== id)); },
   };
 }
@@ -240,6 +265,11 @@ async function startSync() {
   if (!Array.isArray(saved) || !saved.length) await store.setCountries(state.countries);
   if (!state.countries.includes(state.activeCountry)) state.activeCountry = "Malaysia";
 
+  // Load (and seed) the cuisine dropdown list.
+  const savedCuisines = await store.getCuisines();
+  state.cuisines = (Array.isArray(savedCuisines) && savedCuisines.length) ? savedCuisines : [...DEFAULT_CUISINES];
+  if (!Array.isArray(savedCuisines) || !savedCuisines.length) await store.setCuisines(state.cuisines);
+
   // Live-sync restaurants.
   state.unsub = store.subscribe((restaurants) => {
     state.restaurants = restaurants;
@@ -250,7 +280,9 @@ async function startSync() {
 }
 
 async function saveCountries() { await store.setCountries(state.countries); }
+async function saveCuisines() { await store.setCuisines(state.cuisines); }
 async function saveRestaurant(data) { await store.add(data); }
+async function updateRestaurant(id, data) { await store.update(id, data); }
 async function deleteRestaurant(id) { await store.remove(id); }
 
 // ===========================================================================
@@ -347,6 +379,31 @@ function getStatus(restaurant) {
   return "closed";
 }
 
+// Build a readable Mon–Sun schedule from the opening-hours string.
+function weeklySchedule(restaurant) {
+  const rules = parseHours(restaurant.openingHours);
+  if (!rules) return null;
+  const fmt = (m) => {
+    m = ((m % 1440) + 1440) % 1440;
+    let h = Math.floor(m / 60); const mn = m % 60;
+    const ap = h < 12 ? "AM" : "PM";
+    h = h % 12; if (h === 0) h = 12;
+    return `${h}:${String(mn).padStart(2, "0")} ${ap}`;
+  };
+  const tz = COUNTRY_TZ[restaurant.country] || "Asia/Kuala_Lumpur";
+  const today = nowInTz(tz).day;
+  const days = [["Monday", 1], ["Tuesday", 2], ["Wednesday", 3], ["Thursday", 4], ["Friday", 5], ["Saturday", 6], ["Sunday", 0]];
+  return days.map(([label, d]) => {
+    const ranges = [];
+    for (const rule of rules) if (rule.days.includes(d)) ranges.push(...rule.ranges);
+    ranges.sort((a, b) => a[0] - b[0]);
+    const text = ranges.length
+      ? ranges.map(([s, e]) => (s === 0 && e === 1440) ? "Open 24 hours" : `${fmt(s)} – ${fmt(e)}`).join(", ")
+      : "Closed";
+    return { day: label, text, isToday: d === today, closed: !ranges.length };
+  });
+}
+
 // ===========================================================================
 // CROWD ESTIMATE (time-of-day heuristic — not live data)
 // ===========================================================================
@@ -363,11 +420,11 @@ function getCrowd(restaurant) {
 // ===========================================================================
 // DISTANCE
 // ===========================================================================
-function requestLocation() {
-  if (!navigator.geolocation) return;
+function requestLocation(onResult) {
+  if (!navigator.geolocation) { if (onResult) onResult("unsupported"); return; }
   navigator.geolocation.getCurrentPosition(
-    (pos) => { state.userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }; renderAll(); },
-    () => { /* denied — distance just shows a prompt */ },
+    (pos) => { state.userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }; renderAll(); if (onResult) onResult("ok"); },
+    (err) => { state.locDenied = (err.code === 1); renderAll(); if (onResult) onResult("error"); },
     { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
   );
 }
@@ -507,6 +564,32 @@ function openDetail(r) {
   const dist = distanceKm(r);
   const dishes = Array.isArray(r.dishes) ? r.dishes.filter(Boolean) : [];
 
+  // Opening hours as a readable weekly schedule.
+  const sched = weeklySchedule(r);
+  let hoursHtml;
+  if (sched) {
+    hoursHtml = `<div class="hours-grid">` + sched.map((s) =>
+      `<div class="hours-day${s.isToday ? " hours-today" : ""}">${s.day}</div>` +
+      `<div class="hours-time${s.isToday ? " hours-today" : ""}${s.closed ? " hours-closed" : ""}">${esc(s.text)}</div>`
+    ).join("") + `</div>`;
+  } else if (r.openingHours) {
+    hoursHtml = esc(r.openingHours);
+  } else {
+    hoursHtml = `<span style="color:var(--muted)">Not recorded — add via Edit</span>`;
+  }
+
+  // Distance can fail two different ways — be explicit about which.
+  let distHtml;
+  if (!r.lat || !r.lng) {
+    distHtml = `<span style="color:var(--muted)">No map location saved — add coordinates via Edit</span>`;
+  } else if (dist != null) {
+    distHtml = `${dist.toFixed(dist < 10 ? 1 : 0)} km from you`;
+  } else if (state.locDenied) {
+    distHtml = `<button class="link-btn" id="enable-loc" type="button">Location blocked — tap to retry</button>`;
+  } else {
+    distHtml = `<button class="link-btn" id="enable-loc" type="button">Tap to allow location</button>`;
+  }
+
   const row = (label, value) => `
     <div class="detail-row"><div class="label">${label}</div><div class="value">${value}</div></div>`;
 
@@ -521,20 +604,24 @@ function openDetail(r) {
     <div class="detail-rows">
       ${row("Area", esc([r.district, r.country].filter(Boolean).join(", ") || "—"))}
       ${row("Address", esc(r.address || "—"))}
-      ${row("Opening hours", esc(r.openingHours || "Not recorded"))}
+      ${row("Opening hours", hoursHtml)}
       ${row("Contact", r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : "—")}
       ${row("Crowd level", crowd ? `<span class="chip crowd-${crowd.level}">${crowd.label}</span> <span style="color:var(--muted);font-size:.8rem">(estimate)</span>` : "—")}
-      ${row("Distance", dist != null ? `${dist.toFixed(dist < 10 ? 1 : 0)} km from you` : `<span style="color:var(--muted)">Enable location to see distance</span>`)}
+      ${row("Distance", distHtml)}
       ${row("Map", `<a class="map-btn" href="${mapUrl(r)}" target="_blank" rel="noopener">Open in Google Maps</a>`)}
       ${row("Recommended dishes", dishes.length ? `<ul class="dish-list">${dishes.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : "—")}
     </div>
     <div class="detail-actions">
       <button class="btn-danger" id="detail-delete" type="button">Delete</button>
+      <button class="btn-ghost" id="detail-edit" type="button">Edit</button>
       <button class="btn-ghost" id="detail-close" type="button">Close</button>
     </div>`;
 
   show($("detail-modal"));
   $("detail-close").onclick = () => hide($("detail-modal"));
+  $("detail-edit").onclick = () => openEditRestaurant(r);
+  const enableLoc = document.getElementById("enable-loc");
+  if (enableLoc) enableLoc.onclick = () => { enableLoc.textContent = "Locating…"; requestLocation(() => openDetail(r)); };
   $("detail-delete").onclick = async () => {
     if (confirm(`Delete "${r.name}"?`)) { await deleteRestaurant(r.id); hide($("detail-modal")); }
   };
@@ -558,20 +645,150 @@ $("country-save").onclick = async () => {
 document.querySelectorAll("[data-close-country]").forEach((b) => b.onclick = () => hide($("country-modal")));
 
 // ===========================================================================
+// SETTINGS — manage the cuisine dropdown list
+// ===========================================================================
+$("btn-settings").onclick = () => { renderCuisineEditor(); show($("settings-modal")); };
+
+function renderCuisineEditor() {
+  const ul = $("cuisine-list");
+  ul.innerHTML = "";
+  state.cuisines.forEach((c) => {
+    const li = document.createElement("li");
+    li.className = "chip-edit";
+    li.innerHTML = `<span>${esc(c)}</span><button type="button" aria-label="Remove ${esc(c)}">×</button>`;
+    li.querySelector("button").onclick = async () => {
+      state.cuisines = state.cuisines.filter((x) => x !== c);
+      await saveCuisines();
+      renderCuisineEditor();
+    };
+    ul.appendChild(li);
+  });
+}
+
+async function addCuisine() {
+  const input = $("cuisine-new");
+  const val = titleCase(input.value.trim());
+  if (val && !state.cuisines.includes(val)) {
+    state.cuisines.push(val);
+    await saveCuisines();
+    renderCuisineEditor();
+  }
+  input.value = "";
+  input.focus();
+}
+$("cuisine-add").onclick = addCuisine;
+$("cuisine-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCuisine(); });
+document.querySelectorAll("[data-close-settings]").forEach((b) => b.onclick = () => hide($("settings-modal")));
+$("settings-modal").addEventListener("click", (e) => { if (e.target.id === "settings-modal") hide($("settings-modal")); });
+
+// ===========================================================================
 // ADD RESTAURANT
 // ===========================================================================
 $("open-filter").onclick = () => { state.openOnly = !state.openOnly; renderList(); };
 
-$("btn-add").onclick = () => {
-  $("search-name").value = "";
-  $("search-results").innerHTML = "";
-  $("search-status").textContent = "";
-  $("search-country-label").textContent = state.activeCountry;
-  // Offer areas already used in this country as type-ahead suggestions.
+// ----- Per-day opening-hours editor -----------------------------------------
+// Mon–Sun rows with open toggle + from/to times. Converts to/from the OSM-style
+// string the rest of the app already understands, so status/schedule logic is unchanged.
+const HOURS_DAYS = [["Monday", "Mo"], ["Tuesday", "Tu"], ["Wednesday", "We"], ["Thursday", "Th"], ["Friday", "Fr"], ["Saturday", "Sa"], ["Sunday", "Su"]];
+const CODE_NUM = { Su: 0, Mo: 1, Tu: 2, We: 3, Th: 4, Fr: 5, Sa: 6 };
+
+function minToHHMM(m) { if (m >= 1440) m = 1439; const h = Math.floor(m / 60), mn = m % 60; return `${String(h).padStart(2, "0")}:${String(mn).padStart(2, "0")}`; }
+
+function hoursStringToByDay(str) {
+  const rules = parseHours(str);
+  const byDay = {};
+  if (!rules) return byDay;
+  for (const [, code] of HOURS_DAYS) {
+    const num = CODE_NUM[code];
+    for (const rule of rules) {
+      if (rule.days.includes(num) && rule.ranges.length) {
+        const [s, e] = rule.ranges[0];
+        byDay[code] = { from: minToHHMM(s), to: minToHHMM(e) };
+        break;
+      }
+    }
+  }
+  return byDay;
+}
+
+function renderHoursEditor(byDay) {
+  const wrap = $("hours-editor");
+  wrap.innerHTML = "";
+  for (const [label, code] of HOURS_DAYS) {
+    const open = !!byDay[code];
+    const from = (byDay[code] && byDay[code].from) || "09:00";
+    const to = (byDay[code] && byDay[code].to) || "22:00";
+    const row = document.createElement("div");
+    row.className = "he-row" + (open ? "" : " closed");
+    row.dataset.code = code;
+    row.innerHTML = `
+      <label class="he-day"><input type="checkbox" class="he-open" ${open ? "checked" : ""}> ${label}</label>
+      <div class="he-times">
+        <input type="time" class="he-from" value="${from}">
+        <span>–</span>
+        <input type="time" class="he-to" value="${to}">
+      </div>`;
+    const cb = row.querySelector(".he-open");
+    cb.onchange = () => row.classList.toggle("closed", !cb.checked);
+    wrap.appendChild(row);
+  }
+}
+
+function collectHoursString() {
+  const parts = [];
+  for (const row of $("hours-editor").querySelectorAll(".he-row")) {
+    if (!row.querySelector(".he-open").checked) continue;
+    const from = row.querySelector(".he-from").value;
+    const to = row.querySelector(".he-to").value;
+    if (from && to && from !== to) parts.push(`${row.dataset.code} ${from}-${to}`);
+  }
+  return parts.join("; ");
+}
+
+$("hours-copy").onclick = () => {
+  const rows = [...$("hours-editor").querySelectorAll(".he-row")];
+  if (!rows.length) return;
+  const mon = rows[0];
+  const openMon = mon.querySelector(".he-open").checked;
+  const from = mon.querySelector(".he-from").value;
+  const to = mon.querySelector(".he-to").value;
+  rows.forEach((r) => {
+    r.querySelector(".he-open").checked = openMon;
+    r.querySelector(".he-from").value = from;
+    r.querySelector(".he-to").value = to;
+    r.classList.toggle("closed", !openMon);
+  });
+};
+
+// Fill the cuisine dropdown from the managed list, keeping the current value
+// selectable even if it isn't in the list (e.g. an auto-filled OSM cuisine).
+function populateCuisineSelect(selected) {
+  const sel = $("f-cuisine");
+  const list = [...state.cuisines];
+  if (selected && !list.includes(selected)) list.unshift(selected);
+  sel.innerHTML = `<option value="">— Select cuisine —</option>` +
+    list.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  sel.value = selected || "";
+}
+
+// Offer areas already used in this country as type-ahead suggestions.
+function populateDistrictOptions() {
   const areas = [...new Set(state.restaurants
     .filter((r) => (r.country || "Malaysia") === state.activeCountry)
     .map((r) => r.district).filter(Boolean))].sort();
   $("district-options").innerHTML = areas.map((a) => `<option value="${esc(a)}"></option>`).join("");
+}
+
+$("btn-add").onclick = () => {
+  state.editingId = null;
+  $("add-title").textContent = "Add restaurant";
+  $("search-name").value = "";
+  $("search-results").innerHTML = "";
+  $("search-status").textContent = "";
+  $("search-country-label").textContent = state.activeCountry;
+  populateDistrictOptions();
+  populateCuisineSelect("");
+  renderHoursEditor({});
   show($("add-step-search"));
   hide($("add-step-edit"));
   show($("add-modal"));
@@ -598,7 +815,7 @@ async function runSearch() {
       results = data.results || [];
     }
     if (!results.length) {
-      $("search-status").textContent = "Nothing found. Try a different spelling, or enter it manually below.";
+      $("search-status").innerHTML = `Not found in the map database. Try a different spelling, or tap <strong>“Add it manually”</strong> below to enter it yourself.`;
       return;
     }
     $("search-status").textContent = `${results.length} match${results.length > 1 ? "es" : ""} — pick one:`;
@@ -623,9 +840,9 @@ $("manual-entry").onclick = () => fillEditForm({});
 
 function fillEditForm(d) {
   $("f-name").value = d.name || $("search-name").value.trim();
-  $("f-cuisine").value = d.cuisine || "";
+  populateCuisineSelect(d.cuisine || "");
   $("f-address").value = d.address || "";
-  $("f-hours").value = d.openingHours || "";
+  renderHoursEditor(hoursStringToByDay(d.openingHours || ""));
   $("f-phone").value = d.phone || "";
   $("f-lat").value = d.lat ?? "";
   $("f-lng").value = d.lng ?? "";
@@ -635,25 +852,49 @@ function fillEditForm(d) {
   show($("add-step-edit"));
 }
 
+// Open the edit form pre-filled with an existing restaurant's details.
+function openEditRestaurant(r) {
+  state.editingId = r.id;
+  $("add-title").textContent = "Edit restaurant";
+  populateDistrictOptions();
+  $("f-name").value = r.name || "";
+  populateCuisineSelect(r.cuisine || "");
+  $("f-address").value = r.address || "";
+  renderHoursEditor(hoursStringToByDay(r.openingHours || ""));
+  $("f-phone").value = r.phone || "";
+  $("f-lat").value = r.lat ?? "";
+  $("f-lng").value = r.lng ?? "";
+  $("f-district").value = r.district || "";
+  $("f-dishes").value = Array.isArray(r.dishes) ? r.dishes.join(", ") : "";
+  hide($("detail-modal"));
+  hide($("add-step-search"));
+  show($("add-step-edit"));
+  show($("add-modal"));
+}
+
 $("save-restaurant").onclick = async () => {
-  const name = $("f-name").value.trim();
+  const name = titleCase($("f-name").value.trim());
   if (!name) { alert("Give it a name at least."); return; }
   const lat = parseFloat($("f-lat").value);
   const lng = parseFloat($("f-lng").value);
-  const district = $("f-district").value.trim().replace(/\b\w/g, (c) => c.toUpperCase());
   const data = {
     name,
     country: state.activeCountry,
-    district,
-    cuisine: $("f-cuisine").value.trim(),
+    district: titleCase($("f-district").value.trim()),
+    cuisine: titleCase($("f-cuisine").value.trim()),
     address: $("f-address").value.trim(),
-    openingHours: $("f-hours").value.trim(),
+    openingHours: collectHoursString(),
     phone: $("f-phone").value.trim(),
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
-    dishes: $("f-dishes").value.split(",").map((s) => s.trim()).filter(Boolean),
+    dishes: $("f-dishes").value.split(",").map((s) => titleCase(s.trim())).filter(Boolean),
   };
-  await saveRestaurant(data);
+  if (state.editingId) {
+    await updateRestaurant(state.editingId, data);
+    state.editingId = null;
+  } else {
+    await saveRestaurant(data);
+  }
   hide($("add-modal"));
 };
 
