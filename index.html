@@ -143,10 +143,24 @@
         <div class="hours-block">
           <div class="hours-cap">
             <span>Opening hours <span class="auto-tag">auto-filled if found</span></span>
-            <button id="hours-copy" class="link-btn" type="button">Copy Monday to all days</button>
           </div>
-          <div id="hours-editor" class="hours-editor"></div>
-          <p class="hint">Tick the days it’s open and set the times. Unticked days count as closed. The Open/Closed status is worked out from this.</p>
+          <label class="hours-mode"><input type="checkbox" id="hours-same" checked> Same time every open day</label>
+
+          <!-- Simple mode: pick days, one time for all of them -->
+          <div id="hours-simple">
+            <div class="day-chips" id="day-chips"></div>
+            <div class="simple-times">
+              <span>Open</span>
+              <input type="time" id="simple-from" value="09:00" />
+              <span>–</span>
+              <input type="time" id="simple-to" value="22:00" />
+            </div>
+          </div>
+
+          <!-- Custom mode: different times per day -->
+          <div id="hours-editor" class="hours-editor hidden"></div>
+
+          <p class="hint">Tap the days it’s open and set the time. Untap a day to mark it closed. Untick “Same time…” if a day needs different hours. The Open/Closed status is worked out from this.</p>
         </div>
         <div class="modal-actions">
           <button class="btn-ghost" data-close-add type="button">Cancel</button>

@@ -150,6 +150,11 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 .r-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .r-name { font-weight: 600; font-size: 1.05rem; margin: 0; }
 .r-meta { color: var(--muted); font-size: .85rem; margin: 0; }
+.r-dishes {
+  margin: 0; font-size: .85rem; color: var(--text); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.r-dishes-label { color: var(--accent-2); font-weight: 600; }
 .crowd-na { color: var(--muted); font-size: .82rem; }
 .map-btn-sm {
   flex: 0 0 auto; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent-2);
@@ -227,6 +232,20 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 
 /* Per-day opening hours editor */
 .hours-block { margin-top: 18px; }
+.hours-mode { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: .9rem; cursor: pointer; margin-bottom: 14px; }
+.hours-mode input { width: 18px; height: 18px; accent-color: var(--accent); }
+.day-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.day-chip {
+  flex: 0 0 auto; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+  padding: 8px 12px; border-radius: 999px; cursor: pointer; font-size: .85rem; min-width: 48px;
+}
+.day-chip.active { background: var(--accent); color: #18120e; border-color: var(--accent); font-weight: 600; }
+.simple-times { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.simple-times input[type="time"] {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  padding: 9px; border-radius: 8px; outline: none; flex: 1; min-width: 0;
+}
+.simple-times input[type="time"]:focus { border-color: var(--accent); }
 .hours-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: .85rem; margin-bottom: 10px; }
 .hours-cap .link-btn { font-size: .8rem; padding: 0; white-space: nowrap; }
 .hours-editor { display: flex; flex-direction: column; gap: 8px; }

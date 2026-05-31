@@ -531,6 +531,7 @@ function renderList() {
     const status = getStatus(r);
     const crowd = getCrowd(r);
     const meta = [r.cuisine, r.district].filter(Boolean).join(" · ") || "—";
+    const dishes = Array.isArray(r.dishes) ? r.dishes.filter(Boolean) : [];
     const li = document.createElement("li");
     li.className = "r-card";
     // Tapping the card opens detail — but let the Maps link do its own thing.
@@ -541,6 +542,7 @@ function renderList() {
         <span class="status-badge status-${status}">${statusLabel(status)}</span>
       </div>
       <p class="r-meta">${esc(meta)}</p>
+      ${dishes.length ? `<p class="r-dishes"><span class="r-dishes-label">Try:</span> ${esc(dishes.join(", "))}</p>` : ""}
       <div class="r-card-bottom">
         ${crowd
           ? `<span class="chip crowd-${crowd.level}">${crowd.label}</span>`
@@ -734,30 +736,91 @@ function renderHoursEditor(byDay) {
   }
 }
 
-function collectHoursString() {
-  const parts = [];
+// Read the per-day (custom) editor into a {code:{from,to}} map of open days.
+function collectHoursByDay() {
+  const byDay = {};
   for (const row of $("hours-editor").querySelectorAll(".he-row")) {
     if (!row.querySelector(".he-open").checked) continue;
     const from = row.querySelector(".he-from").value;
     const to = row.querySelector(".he-to").value;
-    if (from && to && from !== to) parts.push(`${row.dataset.code} ${from}-${to}`);
+    if (from && to && from !== to) byDay[row.dataset.code] = { from, to };
   }
-  return parts.join("; ");
+  return byDay;
 }
 
-$("hours-copy").onclick = () => {
-  const rows = [...$("hours-editor").querySelectorAll(".he-row")];
-  if (!rows.length) return;
-  const mon = rows[0];
-  const openMon = mon.querySelector(".he-open").checked;
-  const from = mon.querySelector(".he-from").value;
-  const to = mon.querySelector(".he-to").value;
-  rows.forEach((r) => {
-    r.querySelector(".he-open").checked = openMon;
-    r.querySelector(".he-from").value = from;
-    r.querySelector(".he-to").value = to;
-    r.classList.toggle("closed", !openMon);
-  });
+// null = no open days, false = open days have differing times, else the shared {from,to}.
+function byDayUniformTime(byDay) {
+  const vals = Object.values(byDay);
+  if (!vals.length) return null;
+  const first = vals[0];
+  return vals.every((v) => v.from === first.from && v.to === first.to) ? first : false;
+}
+
+// ----- Simple mode: day chips + one shared time -----
+function renderDayChips(activeCodes) {
+  const wrap = $("day-chips");
+  wrap.innerHTML = "";
+  for (const [label, code] of HOURS_DAYS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "day-chip" + (activeCodes.includes(code) ? " active" : "");
+    b.textContent = label.slice(0, 3);
+    b.dataset.code = code;
+    b.onclick = () => b.classList.toggle("active");
+    wrap.appendChild(b);
+  }
+}
+const getActiveChips = () => [...$("day-chips").querySelectorAll(".day-chip.active")].map((b) => b.dataset.code);
+
+function simpleToByDay() {
+  const from = $("simple-from").value, to = $("simple-to").value;
+  const byDay = {};
+  if (from && to && from !== to) for (const c of getActiveChips()) byDay[c] = { from, to };
+  return byDay;
+}
+
+function showSimple(on) {
+  $("hours-simple").classList.toggle("hidden", !on);
+  $("hours-editor").classList.toggle("hidden", on);
+}
+
+// Set both modes from a {code:{from,to}} map, choosing simple unless times differ.
+function setHoursUI(byDay) {
+  const uniform = byDayUniformTime(byDay);
+  const openCodes = HOURS_DAYS.map(([, c]) => c).filter((c) => byDay[c]);
+  renderHoursEditor(byDay);
+  if (uniform === false) {
+    $("hours-same").checked = false;
+    renderDayChips(openCodes);
+    showSimple(false);
+  } else {
+    $("hours-same").checked = true;
+    renderDayChips(openCodes);
+    $("simple-from").value = uniform ? uniform.from : "09:00";
+    $("simple-to").value = uniform ? uniform.to : "22:00";
+    showSimple(true);
+  }
+}
+
+function collectHoursString() {
+  const byDay = $("hours-same").checked ? simpleToByDay() : collectHoursByDay();
+  return HOURS_DAYS.filter(([, c]) => byDay[c]).map(([, c]) => `${c} ${byDay[c].from}-${byDay[c].to}`).join("; ");
+}
+
+// Switching modes carries the current selection across.
+$("hours-same").onchange = () => {
+  if ($("hours-same").checked) {
+    const byDay = collectHoursByDay();
+    const uniform = byDayUniformTime(byDay);
+    const first = Object.values(byDay)[0];
+    renderDayChips(Object.keys(byDay));
+    $("simple-from").value = (uniform && uniform.from) || (first && first.from) || "09:00";
+    $("simple-to").value = (uniform && uniform.to) || (first && first.to) || "22:00";
+    showSimple(true);
+  } else {
+    renderHoursEditor(simpleToByDay());
+    showSimple(false);
+  }
 };
 
 // Fill the cuisine dropdown from the managed list, keeping the current value
@@ -788,7 +851,7 @@ $("btn-add").onclick = () => {
   $("search-country-label").textContent = state.activeCountry;
   populateDistrictOptions();
   populateCuisineSelect("");
-  renderHoursEditor({});
+  setHoursUI({});
   show($("add-step-search"));
   hide($("add-step-edit"));
   show($("add-modal"));
@@ -842,7 +905,7 @@ function fillEditForm(d) {
   $("f-name").value = d.name || $("search-name").value.trim();
   populateCuisineSelect(d.cuisine || "");
   $("f-address").value = d.address || "";
-  renderHoursEditor(hoursStringToByDay(d.openingHours || ""));
+  setHoursUI(hoursStringToByDay(d.openingHours || ""));
   $("f-phone").value = d.phone || "";
   $("f-lat").value = d.lat ?? "";
   $("f-lng").value = d.lng ?? "";
@@ -860,7 +923,7 @@ function openEditRestaurant(r) {
   $("f-name").value = r.name || "";
   populateCuisineSelect(r.cuisine || "");
   $("f-address").value = r.address || "";
-  renderHoursEditor(hoursStringToByDay(r.openingHours || ""));
+  setHoursUI(hoursStringToByDay(r.openingHours || ""));
   $("f-phone").value = r.phone || "";
   $("f-lat").value = r.lat ?? "";
   $("f-lng").value = r.lng ?? "";
