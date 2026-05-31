@@ -267,19 +267,26 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 .detail-cuisine { color: var(--accent-2); font-size: .9rem; margin: 4px 0 0; }
 .detail-rows { display: flex; flex-direction: column; gap: 0; margin-top: 16px; }
 .detail-row { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
-.detail-row .label { flex: 0 0 130px; color: var(--muted); font-size: .9rem; }
-.detail-row .value { flex: 1; font-size: .95rem; word-break: break-word; }
+.detail-row .label { flex: 0 0 120px; color: var(--muted); font-size: .9rem; }
+.detail-row .value { flex: 1; min-width: 0; font-size: .95rem; word-break: break-word; }
 .detail-row .value a { color: var(--accent-2); }
+.detail-row-stacked { flex-direction: column; gap: 10px; }
+.detail-row-stacked .label { flex: none; }
 .chip { display: inline-block; font-size: .78rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
 .crowd-low { background: rgba(52,199,123,.15); color: var(--green); }
 .crowd-med { background: rgba(240,180,41,.15); color: var(--amber); }
 .crowd-high { background: rgba(240,85,107,.15); color: var(--red); }
 .dish-list { margin: 0; padding-left: 18px; }
-.hours-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 18px; }
+.hours-grid { display: grid; grid-template-columns: 104px 1fr; gap: 7px 12px; width: 100%; align-items: baseline; }
 .hours-day { color: var(--muted); }
-.hours-time { color: var(--text); }
+.hours-time { color: var(--text); white-space: nowrap; }
 .hours-closed { color: var(--muted); }
 .hours-today { color: var(--accent-2); font-weight: 700; }
-.detail-actions { display: flex; gap: 10px; margin-top: 22px; }
+.detail-actions {
+  display: flex; gap: 10px; margin-top: 18px;
+  position: sticky; bottom: 0; background: var(--surface);
+  padding: 14px 0 4px; border-top: 1px solid var(--border);
+}
+.detail-actions button { flex: 1; }
 .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
 .map-btn { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent-2); padding: 10px 14px; border-radius: 10px; text-decoration: none; }

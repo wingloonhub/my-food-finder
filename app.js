@@ -606,7 +606,7 @@ function openDetail(r) {
     <div class="detail-rows">
       ${row("Area", esc([r.district, r.country].filter(Boolean).join(", ") || "—"))}
       ${row("Address", esc(r.address || "—"))}
-      ${row("Opening hours", hoursHtml)}
+      <div class="detail-row detail-row-stacked"><div class="label">Opening hours</div><div class="value">${hoursHtml}</div></div>
       ${row("Contact", r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : "—")}
       ${row("Crowd level", crowd ? `<span class="chip crowd-${crowd.level}">${crowd.label}</span> <span style="color:var(--muted);font-size:.8rem">(estimate)</span>` : "—")}
       ${row("Distance", distHtml)}
