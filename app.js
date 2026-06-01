@@ -52,6 +52,7 @@ const state = {
   restaurants: [],      // all restaurants for the user
   userPos: null,        // {lat, lng}
   locDenied: false,     // true once the user blocks the location prompt
+  pendingShare: null,   // restaurant decoded from a share link, awaiting "Add to my list"
   unsub: null,
 };
 
@@ -234,6 +235,15 @@ function friendlyAuthError(code) {
 
 $("btn-logout").onclick = () => store.logout();
 
+// If the app was opened from a share link, stash the restaurant to offer later.
+(() => {
+  const param = new URLSearchParams(location.search).get("add");
+  if (param) {
+    const data = decodeShare(param);
+    if (data && data.name) state.pendingShare = data;
+  }
+})();
+
 // Bootstrap: wire auth state to the UI. In demo mode this fires immediately
 // with a fake user; in production it follows real Firebase sign-in/out.
 store.initAuth((user) => {
@@ -277,6 +287,9 @@ async function startSync() {
   });
 
   renderAll();
+
+  // If they opened a share link, offer to add it now that we're signed in.
+  if (state.pendingShare) showSharePreview();
 }
 
 async function saveCountries() { await store.setCountries(state.countries); }
@@ -530,6 +543,7 @@ function renderList() {
   for (const r of list) {
     const status = getStatus(r);
     const crowd = getCrowd(r);
+    const dist = distanceKm(r);
     const meta = [r.cuisine, r.district].filter(Boolean).join(" · ") || "—";
     const dishes = Array.isArray(r.dishes) ? r.dishes.filter(Boolean) : [];
     const li = document.createElement("li");
@@ -544,9 +558,12 @@ function renderList() {
       <p class="r-meta">${esc(meta)}</p>
       ${dishes.length ? `<p class="r-dishes"><span class="r-dishes-label">Try:</span> ${esc(dishes.join(", "))}</p>` : ""}
       <div class="r-card-bottom">
-        ${crowd
-          ? `<span class="chip crowd-${crowd.level}">${crowd.label}</span>`
-          : `<span class="crowd-na">Crowd: —</span>`}
+        <div class="r-card-stats">
+          ${crowd
+            ? `<span class="chip crowd-${crowd.level}">${crowd.label}</span>`
+            : `<span class="crowd-na">Crowd: —</span>`}
+          ${dist != null ? `<span class="r-dist">📍 ${dist.toFixed(dist < 10 ? 1 : 0)} km</span>` : ""}
+        </div>
         <a class="map-btn-sm" href="${mapUrl(r)}" target="_blank" rel="noopener">📍 Maps</a>
       </div>`;
     ul.appendChild(li);
@@ -614,20 +631,115 @@ function openDetail(r) {
       ${row("Recommended dishes", dishes.length ? `<ul class="dish-list">${dishes.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : "—")}
     </div>
     <div class="detail-actions">
-      <button class="btn-danger" id="detail-delete" type="button">Delete</button>
+      <button class="btn-share" id="detail-share" type="button">↗ Share</button>
       <button class="btn-ghost" id="detail-edit" type="button">Edit</button>
+      <button class="btn-danger" id="detail-delete" type="button">Delete</button>
       <button class="btn-ghost" id="detail-close" type="button">Close</button>
     </div>`;
 
   show($("detail-modal"));
   $("detail-close").onclick = () => hide($("detail-modal"));
   $("detail-edit").onclick = () => openEditRestaurant(r);
+  $("detail-share").onclick = () => shareRestaurant(r);
   const enableLoc = document.getElementById("enable-loc");
   if (enableLoc) enableLoc.onclick = () => { enableLoc.textContent = "Locating…"; requestLocation(() => openDetail(r)); };
   $("detail-delete").onclick = async () => {
     if (confirm(`Delete "${r.name}"?`)) { await deleteRestaurant(r.id); hide($("detail-modal")); }
   };
 }
+
+// ===========================================================================
+// SHARE A RESTAURANT (link + native share sheet)
+// ===========================================================================
+const SHARE_FIELDS = ["name", "country", "district", "cuisine", "address", "openingHours", "phone", "lat", "lng", "dishes"];
+
+function encodeShare(obj) {
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function decodeShare(s) {
+  try {
+    let b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    return JSON.parse(decodeURIComponent(escape(atob(b64))));
+  } catch { return null; }
+}
+
+function shareUrlFor(r) {
+  const payload = {};
+  for (const k of SHARE_FIELDS) if (r[k] != null && r[k] !== "") payload[k] = r[k];
+  return `${location.origin}/?add=${encodeShare(payload)}`;
+}
+
+async function shareRestaurant(r) {
+  const url = shareUrlFor(r);
+  const bits = [r.cuisine, r.district].filter(Boolean).join(", ");
+  const text = `${r.name}${bits ? ` — ${bits}` : ""}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: r.name, text, url }); } catch { /* user cancelled */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    alert("Share link copied — paste it into any chat to send.");
+  } catch {
+    prompt("Copy this link to share:", url);
+  }
+}
+
+// ----- Receiving a shared restaurant -----
+function clearShareParam() {
+  const u = new URL(location.href);
+  u.searchParams.delete("add");
+  history.replaceState({}, "", u.pathname + (u.search ? u.search : ""));
+}
+
+function showSharePreview() {
+  const r = state.pendingShare;
+  if (!r) return;
+  const dishes = Array.isArray(r.dishes) ? r.dishes.filter(Boolean) : [];
+  const sched = weeklySchedule(r);
+  const hours = sched
+    ? sched.map((s) => `${s.day}: ${s.text}`).join("<br>")
+    : (r.openingHours ? esc(r.openingHours) : "—");
+  const already = state.restaurants.some((x) => x.name === r.name && (x.country || "Malaysia") === (r.country || "Malaysia"));
+  $("share-content").innerHTML = `
+    <p class="share-name">${esc(r.name)}</p>
+    ${r.cuisine ? `<p class="detail-cuisine">${esc(r.cuisine)}</p>` : ""}
+    <div class="detail-rows">
+      ${r.district || r.country ? `<div class="detail-row"><div class="label">Area</div><div class="value">${esc([r.district, r.country].filter(Boolean).join(", "))}</div></div>` : ""}
+      ${r.address ? `<div class="detail-row"><div class="label">Address</div><div class="value">${esc(r.address)}</div></div>` : ""}
+      <div class="detail-row detail-row-stacked"><div class="label">Opening hours</div><div class="value">${hours}</div></div>
+      ${r.phone ? `<div class="detail-row"><div class="label">Contact</div><div class="value">${esc(r.phone)}</div></div>` : ""}
+      ${dishes.length ? `<div class="detail-row"><div class="label">Recommended</div><div class="value">${esc(dishes.join(", "))}</div></div>` : ""}
+    </div>
+    ${already ? `<p class="hint">You already have this one — adding will create a second copy.</p>` : ""}`;
+  show($("share-modal"));
+}
+
+$("share-add").onclick = async () => {
+  const r = state.pendingShare;
+  if (!r) return;
+  const country = r.country || "Malaysia";
+  if (!state.countries.includes(country)) { state.countries.push(country); await saveCountries(); }
+  const lat = typeof r.lat === "number" ? r.lat : parseFloat(r.lat);
+  const lng = typeof r.lng === "number" ? r.lng : parseFloat(r.lng);
+  await saveRestaurant({
+    name: r.name, country, district: r.district || "", cuisine: r.cuisine || "",
+    address: r.address || "", openingHours: r.openingHours || "", phone: r.phone || "",
+    lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+    dishes: Array.isArray(r.dishes) ? r.dishes : [],
+  });
+  state.activeCountry = country;
+  state.activeDistrict = "";
+  state.pendingShare = null;
+  clearShareParam();
+  hide($("share-modal"));
+  renderAll();
+};
+$("share-dismiss").onclick = () => { state.pendingShare = null; clearShareParam(); hide($("share-modal")); };
+
+$("detail-modal").addEventListener("click", (e) => { if (e.target.id === "detail-modal") hide($("detail-modal")); });
 
 $("detail-modal").addEventListener("click", (e) => { if (e.target.id === "detail-modal") hide($("detail-modal")); });
 

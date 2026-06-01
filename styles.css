@@ -148,6 +148,8 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 .r-card:active { background: var(--surface-2); }
 .r-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .r-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.r-card-stats { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.r-dist { color: var(--muted); font-size: .82rem; white-space: nowrap; }
 .r-name { font-weight: 600; font-size: 1.05rem; margin: 0; }
 .r-meta { color: var(--muted); font-size: .85rem; margin: 0; }
 .r-dishes {
@@ -288,5 +290,7 @@ input, select, button { font-family: inherit; font-size: 1rem; }
   padding: 14px 0 4px; border-top: 1px solid var(--border);
 }
 .detail-actions button { flex: 1; }
+.btn-share { background: rgba(255,122,69,.16); border: 1px solid var(--accent); color: var(--accent-2); border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
+.share-name { font-size: 1.25rem; font-weight: 700; margin: 0; }
 .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
 .map-btn { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent-2); padding: 10px 14px; border-radius: 10px; text-decoration: none; }
