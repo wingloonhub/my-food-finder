@@ -1100,6 +1100,30 @@ async function runSearch() {
   const name = $("search-name").value.trim();
   if (!name) return;
   $("search-results").innerHTML = "";
+
+  // If they pasted a Google Maps link, resolve it and auto-fill from it.
+  if (/^https?:\/\//i.test(name)) {
+    if (store.demo) { $("search-status").textContent = "Link lookup runs on the live site. Here, type a name to search."; return; }
+    $("search-status").textContent = "Reading the link…";
+    try {
+      const res = await fetch(`/api/resolve?url=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      if (data && (data.name || data.lat)) {
+        $("search-status").textContent = "";
+        fillEditForm({
+          name: data.name || "", cuisine: data.cuisine || "", district: data.district || "",
+          address: data.address || "", openingHours: data.openingHours || "", phone: data.phone || "",
+          lat: data.lat ?? "", lng: data.lng ?? "",
+        });
+      } else {
+        $("search-status").innerHTML = (data && data.error) ? esc(data.error) : "Couldn't read that link. You can still <strong>Add it manually</strong> below.";
+      }
+    } catch {
+      $("search-status").textContent = "Couldn't read that link. Try again, or add it manually below.";
+    }
+    return;
+  }
+
   $("search-status").textContent = "Searching…";
   try {
     let results;

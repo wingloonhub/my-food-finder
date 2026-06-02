@@ -1,10 +1,14 @@
 // Vercel serverless function: /api/resolve?url=<google maps link>
-// Follows the link (incl. short maps.app.goo.gl links) server-side and pulls
-// out the latitude/longitude. Restricted to Google Maps hosts (no open proxy).
+// Follows a Google Maps link (incl. short maps.app.goo.gl links) server-side,
+// pulls the place NAME and COORDINATES out of the resolved URL, then reverse-
+// geocodes those coordinates against free OpenStreetMap data to fill in the
+// address (and cuisine/hours/phone when OSM has them).
+// Restricted to Google Maps hosts — not an open proxy. No paid API, no key.
 
 const ALLOWED = [
   /(^|\.)google\.com$/i,
-  /(^|\.)google\.[a-z.]+$/i,   // google.com.my etc.
+  /(^|\.)google\.[a-z.]+$/i,
+  /(^|\.)share\.google$/i,
   /(^|\.)goo\.gl$/i,
   /(^|\.)app\.goo\.gl$/i,
 ];
@@ -19,6 +23,45 @@ function extractCoords(s) {
   const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
   if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   return { lat, lng };
+}
+
+function extractName(url, html) {
+  // Preferred: the /maps/place/<Name>/ path segment.
+  let m = (url || "").match(/\/maps\/place\/([^/@?]+)/);
+  if (m) {
+    try { return decodeURIComponent(m[1].replace(/\+/g, " ")).trim(); }
+    catch { return m[1].replace(/\+/g, " ").trim(); }
+  }
+  // Fallback: the page <title> ("Name - Google Maps").
+  m = (html || "").match(/<title>([^<]+)<\/title>/i);
+  if (m) {
+    const t = m[1].replace(/\s*-\s*Google Maps.*/i, "").trim();
+    if (t && !/google maps/i.test(t) && !/^https?:/i.test(t)) return t;
+  }
+  return "";
+}
+
+async function reverseGeocode(lat, lng) {
+  try {
+    const u = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&extratags=1&addressdetails=1&zoom=18`;
+    const r = await fetch(u, { headers: { "User-Agent": "MyFoodFinder/1.0", "Accept-Language": "en" } });
+    if (!r.ok) return {};
+    const p = await r.json();
+    const e = p.extratags || {}, a = p.address || {};
+    const parts = [
+      a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road,
+      a.suburb || a.neighbourhood || a.quarter,
+      a.city || a.town || a.village,
+      a.state, a.postcode,
+    ].filter(Boolean);
+    return {
+      address: parts.join(", "),
+      cuisine: (e.cuisine || "").replace(/[_;]/g, " ").replace(/\s+/g, " ").trim(),
+      openingHours: e.opening_hours || "",
+      phone: e.phone || e["contact:phone"] || a.phone || "",
+      district: a.city || a.town || a.suburb || a.county || a.state || "",
+    };
+  } catch { return {}; }
 }
 
 export default async function handler(req, res) {
@@ -37,19 +80,26 @@ export default async function handler(req, res) {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MyFoodFinder/1.0)", "Accept-Language": "en" },
       redirect: "follow",
     });
-    // Try the final (redirected) URL first, then the page body.
-    let coords = extractCoords(r.url || "");
-    if (!coords) {
-      let body = "";
-      try { body = await r.text(); } catch {}
-      coords = extractCoords(body);
+    const finalUrl = r.url || "";
+    let body = "";
+    try { body = await r.text(); } catch {}
+
+    const coords = extractCoords(finalUrl) || extractCoords(body);
+    const name = extractName(finalUrl, body);
+
+    if (!coords && !name) {
+      res.status(404).json({ error: "Couldn't read that link. Try opening it in Google Maps and sharing the link again." });
+      return;
     }
-    if (coords) {
-      res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate");
-      res.status(200).json(coords);
-    } else {
-      res.status(404).json({ error: "Couldn't find a location in that link." });
-    }
+
+    const enriched = coords ? await reverseGeocode(coords.lat, coords.lng) : {};
+    res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate");
+    res.status(200).json({
+      name,
+      lat: coords ? coords.lat : null,
+      lng: coords ? coords.lng : null,
+      ...enriched,
+    });
   } catch (err) {
     res.status(500).json({ error: "Couldn't open that link." });
   }
