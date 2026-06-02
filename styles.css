@@ -194,7 +194,22 @@ input, select, button { font-family: inherit; font-size: 1rem; }
   .modal-card { border-radius: 18px; }
 }
 
-.field-label { display: block; color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
+.field-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; margin-bottom: 6px; }
+.info-btn {
+  width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--accent);
+  background: transparent; color: var(--accent-2); font-size: .72rem; font-weight: 700;
+  font-style: italic; cursor: pointer; line-height: 1; flex: 0 0 auto;
+}
+.info-btn:active { background: rgba(255,122,69,.15); }
+.link-help {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin: 10px 0; font-size: .85rem; color: var(--text); line-height: 1.5;
+}
+.link-help strong { display: block; margin-bottom: 6px; color: var(--accent-2); }
+.link-help ol { margin: 0 0 8px; padding-left: 20px; }
+.link-help li { margin-bottom: 3px; }
+.link-help p { margin: 0; color: var(--muted); }
+.link-help code { background: var(--bg); padding: 1px 6px; border-radius: 5px; }
 .modal-card select {
   width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
   padding: 12px; border-radius: 10px; outline: none;

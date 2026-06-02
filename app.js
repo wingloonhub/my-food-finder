@@ -866,11 +866,12 @@ $("open-filter").onclick = () => { state.openOnly = !state.openOnly; renderList(
 // ----- Map location: paste a link / coordinates, or use current location -----
 function parseCoords(text) {
   if (!text) return null;
+  // !3d!4d (the place pin) is preferred over @lat,lng (the map viewport centre).
   const pats = [
     /^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/,
-    /@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/,
     /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
     /[?&](?:q|query|ll)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+    /@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/,
   ];
   for (const re of pats) {
     const m = text.match(re);
@@ -1081,6 +1082,7 @@ $("btn-add").onclick = () => {
   $("search-name").value = "";
   $("search-results").innerHTML = "";
   $("search-status").textContent = "";
+  $("link-help").classList.add("hidden");
   $("search-country-label").textContent = state.activeCountry;
   populateDistrictOptions();
   populateCuisineSelect("");
@@ -1095,6 +1097,7 @@ $("add-modal").addEventListener("click", (e) => { if (e.target.id === "add-modal
 
 $("search-go").onclick = runSearch;
 $("search-name").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
+$("link-help-btn").onclick = () => $("link-help").classList.toggle("hidden");
 
 async function runSearch() {
   const name = $("search-name").value.trim();

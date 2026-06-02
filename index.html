@@ -129,12 +129,25 @@
 
       <!-- Step 1: search -->
       <div id="add-step-search">
-        <label class="field-label">Restaurant name or Google Maps link</label>
+        <label class="field-label">Restaurant name or Google Maps link
+          <button id="link-help-btn" class="info-btn" type="button" aria-label="How to paste a link">i</button>
+        </label>
         <div class="search-row">
           <input id="search-name" type="text" placeholder="Type a name, or paste a Google Maps link" />
           <button id="search-go" class="btn-primary" type="button">Go</button>
         </div>
-        <p class="hint">Searching in <strong id="search-country-label">Malaysia</strong>. Paste a Google Maps share link and it’ll auto-fill the name, location and address. Or type a name to look it up in the free map database — if it isn’t found, just add it by hand.</p>
+
+        <div id="link-help" class="link-help hidden">
+          <strong>How to paste a Google Maps link</strong>
+          <ol>
+            <li>In <b>Google Maps</b>, search the restaurant and tap it to open its page.</li>
+            <li>Tap the <b>Share</b> button (not Directions) → <b>Copy link</b>.</li>
+            <li>Come back here, paste it in the box above, and tap <b>Go</b>.</li>
+          </ol>
+          <p>It fills in the name, location and address automatically. The link should start with <code>maps.app.goo.gl</code> — a <code>share.google</code> link won’t carry the location.</p>
+        </div>
+
+        <p class="hint">Searching in <strong id="search-country-label">Malaysia</strong>. Paste a Google Maps link to auto-fill, or type a name to look it up — if it isn’t found, just add it by hand.</p>
         <div id="search-status" class="search-status"></div>
         <ul id="search-results" class="search-results"></ul>
         <div class="manual-row">
