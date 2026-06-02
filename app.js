@@ -2,7 +2,7 @@ import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
-  signInWithEmailAndPassword, signOut,
+  signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, collection, doc, setDoc, getDoc, addDoc,
@@ -87,6 +87,7 @@ function firebaseStore() {
     initAuth(onChange) { onAuthStateChanged(auth, onChange); },
     signup(email, pw) { return createUserWithEmailAndPassword(auth, email, pw); },
     login(email, pw) { return signInWithEmailAndPassword(auth, email, pw); },
+    resetPassword(email) { return sendPasswordResetEmail(auth, email); },
     logout() { return signOut(auth); },
     async getCountries() {
       const s = await getDoc(doc(db, "users", state.uid));
@@ -123,6 +124,7 @@ function demoStore() {
   return {
     demo: true,
     initAuth(onChange) { seedDemoData(); onChange({ uid: "demo", email: "Demo mode" }); },
+    resetPassword() { return Promise.resolve(); },
     async getCountries() { try { return JSON.parse(localStorage.getItem(LS_COUNTRIES)); } catch { return null; } },
     async setCountries(arr) { localStorage.setItem(LS_COUNTRIES, JSON.stringify(arr)); },
     async getCuisines() { try { return JSON.parse(localStorage.getItem(LS_CUISINES)); } catch { return null; } },
@@ -199,25 +201,55 @@ $("tab-signup").onclick = () => setAuthMode("signup");
 
 function setAuthMode(mode) {
   authMode = mode;
-  $("tab-login").classList.toggle("active", mode === "login");
-  $("tab-signup").classList.toggle("active", mode === "signup");
-  $("auth-submit").textContent = mode === "login" ? "Log in" : "Sign up";
-  $("auth-password").autocomplete = mode === "login" ? "current-password" : "new-password";
+  const signup = mode === "signup";
+  $("tab-login").classList.toggle("active", !signup);
+  $("tab-signup").classList.toggle("active", signup);
+  $("auth-submit").textContent = signup ? "Sign up" : "Log in";
+  $("auth-password").autocomplete = signup ? "new-password" : "current-password";
+  $("auth-password").placeholder = signup ? "Create a password (min 6 characters)" : "Password";
+  // Confirm-password field only when signing up; Forgot link only when logging in.
+  $("auth-password2").classList.toggle("hidden", !signup);
+  $("auth-forgot").classList.toggle("hidden", signup);
   $("auth-error").textContent = "";
+  $("auth-note").textContent = "";
 }
 
 $("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("auth-error").textContent = "";
+  $("auth-note").textContent = "";
   const email = $("auth-email").value.trim();
   const pw = $("auth-password").value;
   try {
-    if (authMode === "signup") await store.signup(email, pw);
-    else await store.login(email, pw);
+    if (authMode === "signup") {
+      if (pw.length < 6) { $("auth-error").textContent = "Password must be at least 6 characters."; return; }
+      if (pw !== $("auth-password2").value) { $("auth-error").textContent = "The two passwords don't match."; return; }
+      await store.signup(email, pw);
+    } else {
+      await store.login(email, pw);
+    }
   } catch (err) {
     $("auth-error").textContent = friendlyAuthError(err.code || err.message);
   }
 });
+
+// Forgot password — emails a reset link via Firebase.
+$("auth-forgot").onclick = async () => {
+  $("auth-error").textContent = "";
+  $("auth-note").textContent = "";
+  const email = $("auth-email").value.trim();
+  if (!email) { $("auth-error").textContent = "Enter your email above first, then tap “Forgot password?”."; return; }
+  const sent = `If an account exists for ${email}, a password-reset link is on its way. Check your inbox (and spam).`;
+  try {
+    await store.resetPassword(email);
+    $("auth-note").textContent = sent;
+  } catch (err) {
+    const code = err.code || "";
+    // Don't reveal whether the email is registered.
+    if (code === "auth/user-not-found") $("auth-note").textContent = sent;
+    else $("auth-error").textContent = friendlyAuthError(code || err.message);
+  }
+};
 
 function friendlyAuthError(code) {
   const map = {

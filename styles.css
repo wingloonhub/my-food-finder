@@ -84,7 +84,9 @@ input, select, button { font-family: inherit; font-size: 1rem; }
   padding: 13px 14px; border-radius: 10px; outline: none;
 }
 #auth-form input:focus { border-color: var(--accent); }
+.auth-forgot { display: block; margin: 12px 0 0; font-size: .85rem; }
 .auth-error { color: var(--red); font-size: .88rem; min-height: 1.2em; margin: 12px 0 0; }
+.auth-note { color: var(--green); font-size: .85rem; line-height: 1.5; margin: 6px 0 0; }
 
 /* ---------------- Topbar ---------------- */
 .topbar {

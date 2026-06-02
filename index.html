@@ -33,10 +33,14 @@
       <form id="auth-form" autocomplete="on">
         <input id="auth-email" type="email" placeholder="Email" autocomplete="email" required />
         <input id="auth-password" type="password" placeholder="Password (min 6 characters)" autocomplete="current-password" required minlength="6" />
+        <input id="auth-password2" type="password" placeholder="Confirm password" autocomplete="new-password" minlength="6" class="hidden" />
         <button id="auth-submit" type="submit" class="btn-primary">Log in</button>
       </form>
 
+      <button id="auth-forgot" class="link-btn auth-forgot" type="button">Forgot password?</button>
+
       <p id="auth-error" class="auth-error"></p>
+      <p id="auth-note" class="auth-note"></p>
     </div>
   </section>
 
