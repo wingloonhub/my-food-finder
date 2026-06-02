@@ -131,7 +131,7 @@
       <div id="add-step-search">
         <label class="field-label">Restaurant name</label>
         <div class="search-row">
-          <input id="search-name" type="text" placeholder="e.g. Village Park Restaurant" />
+          <input id="search-name" type="text" placeholder="Type the restaurant name" />
           <button id="search-go" class="btn-primary" type="button">Search</button>
         </div>
         <p class="hint">Searching in <strong id="search-country-label">Malaysia</strong> using a free map database — most places are listed, but not every one. If yours isn’t found, just add it by hand.</p>
@@ -151,6 +151,16 @@
           <label class="full">State / district <span class="auto-tag">auto-filled</span><input id="f-district" type="text" list="district-options" placeholder="e.g. Kuala Lumpur" /><datalist id="district-options"></datalist></label>
           <label class="full">Address<input id="f-address" type="text" /></label>
           <label>Contact no.<input id="f-phone" type="text" /></label>
+          <label class="full">Map location <span class="auto-tag">for distance</span>
+            <div class="loc-row">
+              <input id="f-maplink" type="text" placeholder="Paste Google Maps link, or 3.1456, 101.7089" />
+              <button id="f-maplink-go" class="btn-ghost" type="button">Set</button>
+            </div>
+            <div class="loc-actions">
+              <button id="f-useloc" class="link-btn" type="button">📍 Use my current location</button>
+              <span id="f-map-status" class="loc-status"></span>
+            </div>
+          </label>
           <label>Latitude<input id="f-lat" type="text" inputmode="decimal" /></label>
           <label>Longitude<input id="f-lng" type="text" inputmode="decimal" /></label>
           <label class="full">Dish recommendations (comma separated)<input id="f-dishes" type="text" placeholder="e.g. Nasi Lemak Ayam, Teh Tarik" /></label>

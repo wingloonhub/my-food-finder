@@ -44,7 +44,7 @@ const state = {
   uid: null,
   countries: ["Malaysia"],
   activeCountry: "Malaysia",
-  activeDistrict: "",   // "" = all areas in the active country
+  areaSel: {},          // { country: [area,...] } — selected areas per country, remembered ([] = all)
   cuisine: "",
   cuisines: [],         // managed cuisine list for the dropdown (Settings)
   openOnly: false,      // show only restaurants open right now
@@ -74,6 +74,7 @@ const titleCase = (s) => String(s ?? "").replace(/\S+/g, (w) => w.charAt(0).toUp
 // ---------------------------------------------------------------------------
 const LS_COUNTRIES = "rt_demo_countries";
 const LS_CUISINES = "rt_demo_cuisines";
+const LS_AREASEL = "rt_demo_areasel";
 const LS_RESTAURANTS = "rt_demo_restaurants";
 
 const DEFAULT_CUISINES = [
@@ -103,6 +104,13 @@ function firebaseStore() {
     async setCuisines(arr) {
       await setDoc(doc(db, "users", state.uid), { cuisines: arr }, { merge: true });
     },
+    async getAreaSel() {
+      const s = await getDoc(doc(db, "users", state.uid));
+      return s.exists() && s.data().areaSel ? s.data().areaSel : null;
+    },
+    async setAreaSel(obj) {
+      await setDoc(doc(db, "users", state.uid), { areaSel: obj }, { merge: true });
+    },
     subscribe(cb) {
       const col = collection(db, "users", state.uid, "restaurants");
       return onSnapshot(col, (qs) => cb(qs.docs.map((d) => ({ id: d.id, ...d.data() }))));
@@ -129,6 +137,8 @@ function demoStore() {
     async setCountries(arr) { localStorage.setItem(LS_COUNTRIES, JSON.stringify(arr)); },
     async getCuisines() { try { return JSON.parse(localStorage.getItem(LS_CUISINES)); } catch { return null; } },
     async setCuisines(arr) { localStorage.setItem(LS_CUISINES, JSON.stringify(arr)); },
+    async getAreaSel() { try { return JSON.parse(localStorage.getItem(LS_AREASEL)); } catch { return null; } },
+    async setAreaSel(obj) { localStorage.setItem(LS_AREASEL, JSON.stringify(obj)); },
     subscribe(c) { cb = c; cb(read()); return () => { cb = null; }; },
     async add(data) {
       const arr = read();
@@ -312,6 +322,10 @@ async function startSync() {
   state.cuisines = (Array.isArray(savedCuisines) && savedCuisines.length) ? savedCuisines : [...DEFAULT_CUISINES];
   if (!Array.isArray(savedCuisines) || !savedCuisines.length) await store.setCuisines(state.cuisines);
 
+  // Load the remembered area selection per country.
+  const savedAreaSel = await store.getAreaSel();
+  state.areaSel = (savedAreaSel && typeof savedAreaSel === "object") ? savedAreaSel : {};
+
   // Live-sync restaurants.
   state.unsub = store.subscribe((restaurants) => {
     state.restaurants = restaurants;
@@ -326,6 +340,7 @@ async function startSync() {
 
 async function saveCountries() { await store.setCountries(state.countries); }
 async function saveCuisines() { await store.setCuisines(state.cuisines); }
+async function saveAreaSel() { await store.setAreaSel(state.areaSel); }
 async function saveRestaurant(data) { await store.add(data); }
 async function updateRestaurant(id, data) { await store.update(id, data); }
 async function deleteRestaurant(id) { await store.remove(id); }
@@ -507,7 +522,7 @@ function renderCountryTabs() {
     const b = document.createElement("button");
     b.className = "country-tab" + (c === state.activeCountry ? " active" : "");
     b.textContent = c;
-    b.onclick = () => { state.activeCountry = c; state.activeDistrict = ""; state.cuisine = ""; renderAll(); };
+    b.onclick = () => { state.activeCountry = c; state.cuisine = ""; renderAll(); };
     nav.appendChild(b);
   }
   const add = document.createElement("button");
@@ -518,6 +533,12 @@ function renderCountryTabs() {
   nav.appendChild(add);
 }
 
+// Selected areas for the active country (remembered as the default view).
+function selectedAreas() {
+  const sel = state.areaSel[state.activeCountry];
+  return Array.isArray(sel) ? sel : [];
+}
+
 function renderAreaTabs() {
   const nav = $("area-tabs");
   nav.innerHTML = "";
@@ -526,24 +547,34 @@ function renderAreaTabs() {
   const areas = [...new Set(inCountry.map((r) => r.district).filter(Boolean))].sort();
   if (areas.length < 2) return; // nothing to filter by — hide the row entirely
 
+  const sel = selectedAreas();
+
+  // "All areas" — active when nothing specific is selected. Tapping it clears.
   const all = document.createElement("button");
-  all.className = "area-tab" + (state.activeDistrict === "" ? " active" : "");
+  all.className = "area-tab" + (sel.length === 0 ? " active" : "");
   all.textContent = "All areas";
-  all.onclick = () => { state.activeDistrict = ""; renderAll(); };
+  all.onclick = async () => { state.areaSel[state.activeCountry] = []; await saveAreaSel(); renderAll(); };
   nav.appendChild(all);
 
+  // Each area toggles in/out of the selection (multi-select).
   for (const a of areas) {
     const b = document.createElement("button");
-    b.className = "area-tab" + (a === state.activeDistrict ? " active" : "");
+    b.className = "area-tab" + (sel.includes(a) ? " active" : "");
     b.textContent = a;
-    b.onclick = () => { state.activeDistrict = a; renderAll(); };
+    b.onclick = async () => {
+      const cur = selectedAreas();
+      state.areaSel[state.activeCountry] = cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a];
+      await saveAreaSel();
+      renderAll();
+    };
     nav.appendChild(b);
   }
 }
 
 function inActiveCountry() {
   let list = state.restaurants.filter((r) => (r.country || "Malaysia") === state.activeCountry);
-  if (state.activeDistrict) list = list.filter((r) => (r.district || "") === state.activeDistrict);
+  const sel = selectedAreas();
+  if (sel.length) list = list.filter((r) => sel.includes(r.district || ""));
   return list;
 }
 
@@ -763,7 +794,7 @@ $("share-add").onclick = async () => {
     dishes: Array.isArray(r.dishes) ? r.dishes : [],
   });
   state.activeCountry = country;
-  state.activeDistrict = "";
+  state.areaSel[country] = [];
   state.pendingShare = null;
   clearShareParam();
   hide($("share-modal"));
@@ -831,6 +862,64 @@ $("settings-modal").addEventListener("click", (e) => { if (e.target.id === "sett
 // ADD RESTAURANT
 // ===========================================================================
 $("open-filter").onclick = () => { state.openOnly = !state.openOnly; renderList(); };
+
+// ----- Map location: paste a link / coordinates, or use current location -----
+function parseCoords(text) {
+  if (!text) return null;
+  const pats = [
+    /^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/,
+    /@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/,
+    /!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/,
+    /[?&](?:q|query|ll)=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)/,
+  ];
+  for (const re of pats) {
+    const m = text.match(re);
+    if (m) {
+      const lat = +m[1], lng = +m[2];
+      if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+    }
+  }
+  return null;
+}
+
+function setMapStatus(msg, isErr) {
+  const el = $("f-map-status");
+  el.textContent = msg || "";
+  el.classList.toggle("err", !!isErr);
+}
+function resetMapHelper() { $("f-maplink").value = ""; setMapStatus(""); }
+function setFormCoords(lat, lng) { $("f-lat").value = lat; $("f-lng").value = lng; }
+
+async function applyMapLink() {
+  const raw = $("f-maplink").value.trim();
+  if (!raw) { setMapStatus(""); return; }
+  const local = parseCoords(raw);
+  if (local) { setFormCoords(local.lat, local.lng); setMapStatus("Location set ✓"); $("f-maplink").value = ""; return; }
+  if (/^https?:\/\//i.test(raw)) {
+    if (store.demo) { setMapStatus("Link lookup runs on the live site. Here, paste coordinates like 3.1456, 101.7089.", true); return; }
+    setMapStatus("Reading link…");
+    try {
+      const res = await fetch(`/api/resolve?url=${encodeURIComponent(raw)}`);
+      const data = await res.json();
+      if (data.lat && data.lng) { setFormCoords(data.lat, data.lng); setMapStatus("Location set ✓"); $("f-maplink").value = ""; }
+      else setMapStatus(data.error || "Couldn't read a location from that link.", true);
+    } catch { setMapStatus("Couldn't read that link.", true); }
+    return;
+  }
+  setMapStatus("Paste a Google Maps link, or coordinates like 3.1456, 101.7089.", true);
+}
+$("f-maplink-go").onclick = applyMapLink;
+$("f-maplink").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyMapLink(); } });
+
+$("f-useloc").onclick = () => {
+  if (!navigator.geolocation) { setMapStatus("Location isn't available on this device.", true); return; }
+  setMapStatus("Getting your location…");
+  navigator.geolocation.getCurrentPosition(
+    (pos) => { setFormCoords(pos.coords.latitude.toFixed(6), pos.coords.longitude.toFixed(6)); setMapStatus("Using your current location ✓"); },
+    () => setMapStatus("Couldn't get your location — allow location access and try again.", true),
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+};
 
 // ----- Per-day opening-hours editor -----------------------------------------
 // Mon–Sun rows with open toggle + from/to times. Converts to/from the OSM-style
@@ -1053,8 +1142,9 @@ function fillEditForm(d) {
   $("f-phone").value = d.phone || "";
   $("f-lat").value = d.lat ?? "";
   $("f-lng").value = d.lng ?? "";
-  $("f-district").value = d.district || state.activeDistrict || "";
+  $("f-district").value = d.district || (selectedAreas().length === 1 ? selectedAreas()[0] : "") || "";
   $("f-dishes").value = "";
+  resetMapHelper();
   hide($("add-step-search"));
   show($("add-step-edit"));
 }
@@ -1073,6 +1163,7 @@ function openEditRestaurant(r) {
   $("f-lng").value = r.lng ?? "";
   $("f-district").value = r.district || "";
   $("f-dishes").value = Array.isArray(r.dishes) ? r.dishes.join(", ") : "";
+  resetMapHelper();
   hide($("detail-modal"));
   hide($("add-step-search"));
   show($("add-step-edit"));
