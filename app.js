@@ -48,6 +48,7 @@ const state = {
   cuisine: "",
   cuisines: [],         // managed cuisine list for the dropdown (Settings)
   openOnly: false,      // show only restaurants open right now
+  sortByDistance: false,// sort the list nearest-first
   editingId: null,      // id of the restaurant being edited (null = adding new)
   restaurants: [],      // all restaurants for the user
   userPos: null,        // {lat, lng}
@@ -590,10 +591,23 @@ function renderCuisineFilter() {
 function renderList() {
   const ul = $("restaurant-list");
   $("open-filter").classList.toggle("active", state.openOnly);
+  $("sort-filter").classList.toggle("active", state.sortByDistance);
   let list = inActiveCountry();
   if (state.cuisine) list = list.filter((r) => r.cuisine === state.cuisine);
   if (state.openOnly) list = list.filter((r) => getStatus(r) === "open");
-  list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  if (state.sortByDistance) {
+    // Nearest first; places with no distance (no location/coords) fall to the bottom.
+    list.sort((a, b) => {
+      const da = distanceKm(a), db = distanceKm(b);
+      if (da == null && db == null) return (a.name || "").localeCompare(b.name || "");
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return da - db;
+    });
+  } else {
+    list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
 
   ul.innerHTML = "";
   $("empty-state").classList.toggle("hidden", list.length > 0);
@@ -862,6 +876,12 @@ $("settings-modal").addEventListener("click", (e) => { if (e.target.id === "sett
 // ADD RESTAURANT
 // ===========================================================================
 $("open-filter").onclick = () => { state.openOnly = !state.openOnly; renderList(); };
+$("sort-filter").onclick = () => {
+  state.sortByDistance = !state.sortByDistance;
+  // Need a location to sort by distance — ask for it if we don't have one yet.
+  if (state.sortByDistance && !state.userPos) requestLocation();
+  renderList();
+};
 
 // ----- Map location: paste a link / coordinates, or use current location -----
 function parseCoords(text) {
