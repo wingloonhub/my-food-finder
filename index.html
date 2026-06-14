@@ -66,14 +66,16 @@
     <!-- State / district chips (per country) -->
     <nav class="area-tabs" id="area-tabs"></nav>
 
-    <!-- Toolbar: cuisine filter + add -->
-    <div class="toolbar">
+    <!-- Toolbar: filters on one row, Add on its own row -->
+    <div class="toolbar toolbar-filters">
       <button id="open-filter" class="filter-toggle" type="button">Open now</button>
-      <button id="sort-filter" class="filter-toggle" type="button">📍 Nearest</button>
+      <button id="sort-filter" class="filter-toggle" type="button">Nearest</button>
       <select id="cuisine-filter" class="cuisine-filter">
         <option value="">All cuisines</option>
       </select>
-      <button id="btn-add" class="btn-primary btn-add" type="button">+ Add</button>
+    </div>
+    <div class="toolbar toolbar-add">
+      <button id="btn-add" class="btn-primary btn-add" type="button">+ Add restaurant</button>
     </div>
 
     <!-- Restaurant list -->
@@ -194,6 +196,13 @@
               <input type="time" id="simple-from" value="09:00" />
               <span>–</span>
               <input type="time" id="simple-to" value="22:00" />
+            </div>
+            <label class="hours-split-toggle"><input type="checkbox" id="hours-split"> Closes in between (split hours)</label>
+            <div id="simple-times2" class="simple-times hidden">
+              <span>Reopens</span>
+              <input type="time" id="simple-from2" value="18:00" />
+              <span>–</span>
+              <input type="time" id="simple-to2" value="22:00" />
             </div>
           </div>
 

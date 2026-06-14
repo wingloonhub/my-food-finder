@@ -956,12 +956,13 @@ function hoursStringToByDay(str) {
   if (!rules) return byDay;
   for (const [, code] of HOURS_DAYS) {
     const num = CODE_NUM[code];
-    for (const rule of rules) {
-      if (rule.days.includes(num) && rule.ranges.length) {
-        const [s, e] = rule.ranges[0];
-        byDay[code] = { from: minToHHMM(s), to: minToHHMM(e) };
-        break;
-      }
+    const ranges = [];
+    for (const rule of rules) if (rule.days.includes(num)) ranges.push(...rule.ranges);
+    if (ranges.length) {
+      ranges.sort((a, b) => a[0] - b[0]);
+      const entry = { from: minToHHMM(ranges[0][0]), to: minToHHMM(ranges[0][1]) };
+      if (ranges[1]) { entry.from2 = minToHHMM(ranges[1][0]); entry.to2 = minToHHMM(ranges[1][1]); }
+      byDay[code] = entry;
     }
   }
   return byDay;
@@ -1002,12 +1003,12 @@ function collectHoursByDay() {
   return byDay;
 }
 
-// null = no open days, false = open days have differing times, else the shared {from,to}.
+// null = no open days, false = open days have differing times, else the shared entry.
 function byDayUniformTime(byDay) {
   const vals = Object.values(byDay);
   if (!vals.length) return null;
-  const first = vals[0];
-  return vals.every((v) => v.from === first.from && v.to === first.to) ? first : false;
+  const f = vals[0];
+  return vals.every((v) => v.from === f.from && v.to === f.to && v.from2 === f.from2 && v.to2 === f.to2) ? f : false;
 }
 
 // ----- Simple mode: day chips + one shared time -----
@@ -1028,8 +1029,15 @@ const getActiveChips = () => [...$("day-chips").querySelectorAll(".day-chip.acti
 
 function simpleToByDay() {
   const from = $("simple-from").value, to = $("simple-to").value;
+  const split = $("hours-split").checked;
+  const from2 = $("simple-from2").value, to2 = $("simple-to2").value;
   const byDay = {};
-  if (from && to && from !== to) for (const c of getActiveChips()) byDay[c] = { from, to };
+  if (from && to && from !== to) {
+    for (const c of getActiveChips()) {
+      byDay[c] = { from, to };
+      if (split && from2 && to2 && from2 !== to2) { byDay[c].from2 = from2; byDay[c].to2 = to2; }
+    }
+  }
   return byDay;
 }
 
@@ -1052,13 +1060,26 @@ function setHoursUI(byDay) {
     renderDayChips(openCodes);
     $("simple-from").value = uniform ? uniform.from : "09:00";
     $("simple-to").value = uniform ? uniform.to : "22:00";
+    const hasSplit = !!(uniform && uniform.from2);
+    $("hours-split").checked = hasSplit;
+    $("simple-times2").classList.toggle("hidden", !hasSplit);
+    $("simple-from2").value = hasSplit ? uniform.from2 : "18:00";
+    $("simple-to2").value = hasSplit ? uniform.to2 : "22:00";
     showSimple(true);
   }
 }
 
+// Show/hide the second time range.
+$("hours-split").onchange = () => $("simple-times2").classList.toggle("hidden", !$("hours-split").checked);
+
 function collectHoursString() {
   const byDay = $("hours-same").checked ? simpleToByDay() : collectHoursByDay();
-  return HOURS_DAYS.filter(([, c]) => byDay[c]).map(([, c]) => `${c} ${byDay[c].from}-${byDay[c].to}`).join("; ");
+  return HOURS_DAYS.filter(([, c]) => byDay[c]).map(([, c]) => {
+    const d = byDay[c];
+    let seg = `${c} ${d.from}-${d.to}`;
+    if (d.from2 && d.to2 && d.from2 !== d.to2) seg += `,${d.from2}-${d.to2}`;
+    return seg;
+  }).join("; ");
 }
 
 // Switching modes carries the current selection across.
@@ -1070,6 +1091,8 @@ $("hours-same").onchange = () => {
     renderDayChips(Object.keys(byDay));
     $("simple-from").value = (uniform && uniform.from) || (first && first.from) || "09:00";
     $("simple-to").value = (uniform && uniform.to) || (first && first.to) || "22:00";
+    $("hours-split").checked = false;
+    $("simple-times2").classList.add("hidden");
     showSimple(true);
   } else {
     renderHoursEditor(simpleToByDay());
@@ -1182,7 +1205,9 @@ async function runSearch() {
 $("manual-entry").onclick = () => fillEditForm({});
 
 function fillEditForm(d) {
-  $("f-name").value = d.name || $("search-name").value.trim();
+  // Fall back to the typed name — but never to a pasted link (leave it blank).
+  const typed = $("search-name").value.trim();
+  $("f-name").value = d.name || (/^https?:\/\//i.test(typed) ? "" : typed);
   populateCuisineSelect(d.cuisine || "");
   $("f-address").value = d.address || "";
   setHoursUI(hoursStringToByDay(d.openingHours || ""));
