@@ -52,6 +52,8 @@ const state = {
   editingId: null,      // id of the restaurant being edited (null = adding new)
   restaurants: [],      // all restaurants for the user
   userPos: null,        // {lat, lng}
+  routeInfo: {},        // id -> { km, freeMins } road distance + free-flow time (OSRM)
+  routeKey: "",         // dedupe key for the last routing fetch
   locDenied: false,     // true once the user blocks the location prompt
   pendingShare: null,   // restaurant decoded from a share link, awaiting "Add to my list"
   unsub: null,
@@ -63,6 +65,37 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const show = (el) => el.classList.remove("hidden");
 const hide = (el) => el.classList.add("hidden");
+
+// ----- Back button closes the open dialog instead of leaving the app ---------
+const MODAL_IDS = ["detail-modal", "add-modal", "settings-modal", "share-modal", "country-modal"];
+let modalHistoryActive = false;
+let suppressPop = false;
+function topOpenModal() {
+  for (let i = MODAL_IDS.length - 1; i >= 0; i--) {
+    const el = document.getElementById(MODAL_IDS[i]);
+    if (el && !el.classList.contains("hidden")) return el;
+  }
+  return null;
+}
+function onModalOpened() {
+  if (!modalHistoryActive) { modalHistoryActive = true; history.pushState({ rtModal: 1 }, ""); }
+}
+function onModalClosed() {
+  if (modalHistoryActive && !topOpenModal()) { modalHistoryActive = false; suppressPop = true; history.back(); }
+}
+function showModal(el) { show(el); onModalOpened(); }
+function dismissModal(el) { hide(el); onModalClosed(); }
+window.addEventListener("popstate", () => {
+  if (suppressPop) { suppressPop = false; return; }
+  const top = topOpenModal();
+  if (top) {
+    hide(top);
+    if (topOpenModal()) history.pushState({ rtModal: 1 }, "");
+    else modalHistoryActive = false;
+  } else {
+    modalHistoryActive = false;
+  }
+});
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // Capitalise the first letter of each word (leaves the rest as typed, so
@@ -331,6 +364,7 @@ async function startSync() {
   state.unsub = store.subscribe((restaurants) => {
     state.restaurants = restaurants;
     renderAll();
+    fetchRoutes();
   });
 
   renderAll();
@@ -484,7 +518,7 @@ function getCrowd(restaurant) {
 function requestLocation(onResult) {
   if (!navigator.geolocation) { if (onResult) onResult("unsupported"); return; }
   navigator.geolocation.getCurrentPosition(
-    (pos) => { state.userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }; renderAll(); if (onResult) onResult("ok"); },
+    (pos) => { state.userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }; renderAll(); fetchRoutes(); if (onResult) onResult("ok"); },
     (err) => { state.locDenied = (err.code === 1); renderAll(); if (onResult) onResult("error"); },
     { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
   );
@@ -499,6 +533,57 @@ function distanceKm(restaurant) {
   const a = Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(state.userPos.lat)) * Math.cos(toRad(restaurant.lat)) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Rough traffic multiplier by the user's local time of day (peak = slower).
+function trafficFactor() {
+  const h = new Date().getHours();
+  if ((h >= 7 && h < 9) || (h >= 17 && h < 20)) return 1.5; // rush hour
+  if ((h >= 6 && h < 7) || (h >= 9 && h < 11) || (h >= 16 && h < 17) || (h >= 20 && h < 22)) return 1.2;
+  return 1.0;
+}
+
+// Road distance (km) + drive time (mins) to a restaurant.
+// Uses real road routing (OSRM) when we have it; otherwise estimates from the
+// straight-line distance. Time factors in typical traffic for the time of day.
+function roadInfo(r) {
+  if (!state.userPos || !r.lat || !r.lng) return null;
+  const ri = state.routeInfo[r.id];
+  if (ri && ri.km != null) {
+    return { km: ri.km, mins: Math.max(1, Math.round(ri.freeMins * trafficFactor())) };
+  }
+  const straight = distanceKm(r);
+  if (straight == null) return null;
+  const km = straight * 1.3; // typical road detour vs straight line
+  const mins = Math.max(1, Math.round(km * trafficFactor() * (60 / 36))); // ~36km/h free-flow
+  return { km, mins, est: true };
+}
+
+// Fetch real road distances/times for all located restaurants in one OSRM call.
+let routeFetching = false;
+async function fetchRoutes() {
+  if (!state.userPos) return;
+  const withCoords = state.restaurants.filter((r) => r.lat && r.lng).slice(0, 90);
+  if (!withCoords.length) return;
+  const key = `${state.userPos.lat.toFixed(4)},${state.userPos.lng.toFixed(4)}|${withCoords.map((r) => r.id).sort().join(",")}`;
+  if (key === state.routeKey || routeFetching) return;
+  routeFetching = true;
+  try {
+    const coords = [`${state.userPos.lng},${state.userPos.lat}`, ...withCoords.map((r) => `${r.lng},${r.lat}`)].join(";");
+    const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=distance,duration`;
+    const data = await fetch(url).then((r) => r.json());
+    if (data.code === "Ok" && data.distances && data.durations) {
+      const dists = data.distances[0], durs = data.durations[0];
+      withCoords.forEach((r, i) => {
+        if (dists[i + 1] != null && durs[i + 1] != null) {
+          state.routeInfo[r.id] = { km: dists[i + 1] / 1000, freeMins: durs[i + 1] / 60 };
+        }
+      });
+      state.routeKey = key;
+      renderList();
+    }
+  } catch { /* routing unavailable — fall back to the estimate */ }
+  finally { routeFetching = false; }
 }
 
 function mapUrl(r) {
@@ -598,8 +683,9 @@ function renderList() {
 
   if (state.sortByDistance) {
     // Nearest first; places with no distance (no location/coords) fall to the bottom.
+    const km = (r) => { const info = roadInfo(r); return info ? info.km : null; };
     list.sort((a, b) => {
-      const da = distanceKm(a), db = distanceKm(b);
+      const da = km(a), db = km(b);
       if (da == null && db == null) return (a.name || "").localeCompare(b.name || "");
       if (da == null) return 1;
       if (db == null) return -1;
@@ -620,7 +706,7 @@ function renderList() {
   for (const r of list) {
     const status = getStatus(r);
     const crowd = getCrowd(r);
-    const dist = distanceKm(r);
+    const route = roadInfo(r);
     const meta = [r.cuisine, r.district].filter(Boolean).join(" · ") || "—";
     const dishes = Array.isArray(r.dishes) ? r.dishes.filter(Boolean) : [];
     const li = document.createElement("li");
@@ -639,7 +725,7 @@ function renderList() {
           ${crowd
             ? `<span class="chip crowd-${crowd.level}">${crowd.label}</span>`
             : `<span class="crowd-na">Crowd: —</span>`}
-          ${dist != null ? `<span class="r-dist">📍 ${dist.toFixed(dist < 10 ? 1 : 0)} km</span>` : ""}
+          ${route ? `<span class="r-dist">🚗 ${route.km.toFixed(route.km < 10 ? 1 : 0)} km · ~${route.mins} min</span>` : ""}
         </div>
         <a class="map-btn-sm" href="${mapUrl(r)}" target="_blank" rel="noopener">📍 Maps</a>
       </div>`;
@@ -657,7 +743,7 @@ function statusLabel(s) {
 function openDetail(r) {
   const status = getStatus(r);
   const crowd = getCrowd(r);
-  const dist = distanceKm(r);
+  const route = roadInfo(r);
   const dishes = Array.isArray(r.dishes) ? r.dishes.filter(Boolean) : [];
 
   // Opening hours as a readable weekly schedule.
@@ -678,8 +764,8 @@ function openDetail(r) {
   let distHtml;
   if (!r.lat || !r.lng) {
     distHtml = `<span style="color:var(--muted)">No map location saved — add coordinates via Edit</span>`;
-  } else if (dist != null) {
-    distHtml = `${dist.toFixed(dist < 10 ? 1 : 0)} km from you`;
+  } else if (route) {
+    distHtml = `🚗 ${route.km.toFixed(route.km < 10 ? 1 : 0)} km · ~${route.mins} min drive <span style="color:var(--muted);font-size:.8rem">(est., with traffic)</span>`;
   } else if (state.locDenied) {
     distHtml = `<button class="link-btn" id="enable-loc" type="button">Location blocked — tap to retry</button>`;
   } else {
@@ -714,14 +800,14 @@ function openDetail(r) {
       <button class="btn-ghost" id="detail-close" type="button">Close</button>
     </div>`;
 
-  show($("detail-modal"));
-  $("detail-close").onclick = () => hide($("detail-modal"));
+  showModal($("detail-modal"));
+  $("detail-close").onclick = () => dismissModal($("detail-modal"));
   $("detail-edit").onclick = () => openEditRestaurant(r);
   $("detail-share").onclick = () => shareRestaurant(r);
   const enableLoc = document.getElementById("enable-loc");
   if (enableLoc) enableLoc.onclick = () => { enableLoc.textContent = "Locating…"; requestLocation(() => openDetail(r)); };
   $("detail-delete").onclick = async () => {
-    if (confirm(`Delete "${r.name}"?`)) { await deleteRestaurant(r.id); hide($("detail-modal")); }
+    if (confirm(`Delete "${r.name}"?`)) { await deleteRestaurant(r.id); dismissModal($("detail-modal")); }
   };
 }
 
@@ -791,7 +877,7 @@ function showSharePreview() {
       ${dishes.length ? `<div class="detail-row"><div class="label">Recommended</div><div class="value">${esc(dishes.join(", "))}</div></div>` : ""}
     </div>
     ${already ? `<p class="hint">You already have this one — adding will create a second copy.</p>` : ""}`;
-  show($("share-modal"));
+  showModal($("share-modal"));
 }
 
 $("share-add").onclick = async () => {
@@ -811,34 +897,32 @@ $("share-add").onclick = async () => {
   state.areaSel[country] = [];
   state.pendingShare = null;
   clearShareParam();
-  hide($("share-modal"));
+  dismissModal($("share-modal"));
   renderAll();
 };
-$("share-dismiss").onclick = () => { state.pendingShare = null; clearShareParam(); hide($("share-modal")); };
+$("share-dismiss").onclick = () => { state.pendingShare = null; clearShareParam(); dismissModal($("share-modal")); };
 
-$("detail-modal").addEventListener("click", (e) => { if (e.target.id === "detail-modal") hide($("detail-modal")); });
-
-$("detail-modal").addEventListener("click", (e) => { if (e.target.id === "detail-modal") hide($("detail-modal")); });
+$("detail-modal").addEventListener("click", (e) => { if (e.target.id === "detail-modal") dismissModal($("detail-modal")); });
 
 // ===========================================================================
 // ADD COUNTRY
 // ===========================================================================
-function openCountryModal() { $("country-input").value = ""; show($("country-modal")); $("country-input").focus(); }
+function openCountryModal() { $("country-input").value = ""; showModal($("country-modal")); $("country-input").focus(); }
 $("country-save").onclick = async () => {
   const name = $("country-input").value.trim();
   if (!name) return;
   const clean = name.replace(/\b\w/g, (c) => c.toUpperCase());
   if (!state.countries.includes(clean)) { state.countries.push(clean); await saveCountries(); }
   state.activeCountry = clean;
-  hide($("country-modal"));
+  dismissModal($("country-modal"));
   renderAll();
 };
-document.querySelectorAll("[data-close-country]").forEach((b) => b.onclick = () => hide($("country-modal")));
+document.querySelectorAll("[data-close-country]").forEach((b) => b.onclick = () => dismissModal($("country-modal")));
 
 // ===========================================================================
 // SETTINGS — manage the cuisine dropdown list
 // ===========================================================================
-$("btn-settings").onclick = () => { renderCuisineEditor(); show($("settings-modal")); };
+$("btn-settings").onclick = () => { renderCuisineEditor(); showModal($("settings-modal")); };
 
 function renderCuisineEditor() {
   const ul = $("cuisine-list");
@@ -869,8 +953,8 @@ async function addCuisine() {
 }
 $("cuisine-add").onclick = addCuisine;
 $("cuisine-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCuisine(); });
-document.querySelectorAll("[data-close-settings]").forEach((b) => b.onclick = () => hide($("settings-modal")));
-$("settings-modal").addEventListener("click", (e) => { if (e.target.id === "settings-modal") hide($("settings-modal")); });
+document.querySelectorAll("[data-close-settings]").forEach((b) => b.onclick = () => dismissModal($("settings-modal")));
+$("settings-modal").addEventListener("click", (e) => { if (e.target.id === "settings-modal") dismissModal($("settings-modal")); });
 
 // ===========================================================================
 // ADD RESTAURANT
@@ -1132,11 +1216,11 @@ $("btn-add").onclick = () => {
   setHoursUI({});
   show($("add-step-search"));
   hide($("add-step-edit"));
-  show($("add-modal"));
+  showModal($("add-modal"));
   $("search-name").focus();
 };
-document.querySelectorAll("[data-close-add]").forEach((b) => b.onclick = () => hide($("add-modal")));
-$("add-modal").addEventListener("click", (e) => { if (e.target.id === "add-modal") hide($("add-modal")); });
+document.querySelectorAll("[data-close-add]").forEach((b) => b.onclick = () => dismissModal($("add-modal")));
+$("add-modal").addEventListener("click", (e) => { if (e.target.id === "add-modal") dismissModal($("add-modal")); });
 
 $("search-go").onclick = runSearch;
 $("search-name").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
@@ -1236,10 +1320,10 @@ function openEditRestaurant(r) {
   $("f-district").value = r.district || "";
   $("f-dishes").value = Array.isArray(r.dishes) ? r.dishes.join(", ") : "";
   resetMapHelper();
-  hide($("detail-modal"));
+  hide($("detail-modal")); // transition from detail to add — keep the same history entry
   hide($("add-step-search"));
   show($("add-step-edit"));
-  show($("add-modal"));
+  showModal($("add-modal"));
 }
 
 $("save-restaurant").onclick = async () => {
@@ -1265,7 +1349,7 @@ $("save-restaurant").onclick = async () => {
   } else {
     await saveRestaurant(data);
   }
-  hide($("add-modal"));
+  dismissModal($("add-modal"));
 };
 
 // Re-evaluate Open/Closed + crowd every minute so badges stay live.
