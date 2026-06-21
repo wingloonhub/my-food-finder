@@ -144,6 +144,14 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 }
 .btn-add { flex: 0 0 auto; }
 
+/* ---------------- Search bar ---------------- */
+.search-bar { padding: 2px 18px 8px; }
+.search-bar input {
+  width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  padding: 12px 14px; border-radius: 10px; outline: none; font-size: .95rem;
+}
+.search-bar input:focus { border-color: var(--accent); }
+
 /* ---------------- Restaurant list ---------------- */
 .restaurant-list { list-style: none; margin: 0; padding: 0 18px 40px; display: flex; flex-direction: column; gap: 10px; }
 .r-card {

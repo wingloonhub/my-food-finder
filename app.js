@@ -46,6 +46,7 @@ const state = {
   activeCountry: "Malaysia",
   areaSel: {},          // { country: [area,...] } — selected areas per country, remembered ([] = all)
   cuisine: "",
+  search: "",           // free-text search over names + dishes
   cuisines: [],         // managed cuisine list for the dropdown (Settings)
   openOnly: false,      // show only restaurants open right now
   sortByDistance: false,// sort the list nearest-first
@@ -664,6 +665,14 @@ function inActiveCountry() {
   return list;
 }
 
+// Match a restaurant against the search query — name, dishes, cuisine, or area.
+function matchesSearch(r, q) {
+  if ((r.name || "").toLowerCase().includes(q)) return true;
+  if ((r.cuisine || "").toLowerCase().includes(q)) return true;
+  if ((r.district || "").toLowerCase().includes(q)) return true;
+  return Array.isArray(r.dishes) && r.dishes.some((d) => (d || "").toLowerCase().includes(q));
+}
+
 function renderCuisineFilter() {
   const sel = $("cuisine-filter");
   const cuisines = [...new Set(inActiveCountry().map((r) => r.cuisine).filter(Boolean))].sort();
@@ -677,9 +686,18 @@ function renderList() {
   const ul = $("restaurant-list");
   $("open-filter").classList.toggle("active", state.openOnly);
   $("sort-filter").classList.toggle("active", state.sortByDistance);
-  let list = inActiveCountry();
-  if (state.cuisine) list = list.filter((r) => r.cuisine === state.cuisine);
-  if (state.openOnly) list = list.filter((r) => getStatus(r) === "open");
+  let list;
+  if (state.search) {
+    // Search overrides the chip/dropdown filters — find anything in this country.
+    const q = state.search;
+    list = state.restaurants
+      .filter((r) => (r.country || "Malaysia") === state.activeCountry)
+      .filter((r) => matchesSearch(r, q));
+  } else {
+    list = inActiveCountry();
+    if (state.cuisine) list = list.filter((r) => r.cuisine === state.cuisine);
+    if (state.openOnly) list = list.filter((r) => getStatus(r) === "open");
+  }
 
   if (state.sortByDistance) {
     // Nearest first; places with no distance (no location/coords) fall to the bottom.
@@ -698,9 +716,11 @@ function renderList() {
   ul.innerHTML = "";
   $("empty-state").classList.toggle("hidden", list.length > 0);
   if (!list.length) {
-    $("empty-state").textContent = (state.openOnly || state.cuisine)
-      ? "Nothing matches this filter right now."
-      : "No restaurants here yet. Tap “Add” to start.";
+    $("empty-state").textContent = state.search
+      ? `No restaurant or dish matches “${state.search}”.`
+      : (state.openOnly || state.cuisine)
+        ? "Nothing matches this filter right now."
+        : "No restaurants here yet. Tap “Add” to start.";
   }
 
   for (const r of list) {
@@ -959,6 +979,7 @@ $("settings-modal").addEventListener("click", (e) => { if (e.target.id === "sett
 // ===========================================================================
 // ADD RESTAURANT
 // ===========================================================================
+$("list-search").addEventListener("input", (e) => { state.search = e.target.value.trim().toLowerCase(); renderList(); });
 $("open-filter").onclick = () => { state.openOnly = !state.openOnly; renderList(); };
 $("sort-filter").onclick = () => {
   state.sortByDistance = !state.sortByDistance;
