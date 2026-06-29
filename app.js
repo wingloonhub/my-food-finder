@@ -129,6 +129,7 @@ function firebaseStore() {
     signup(email, pw) { return createUserWithEmailAndPassword(auth, email, pw); },
     login(email, pw) { return signInWithEmailAndPassword(auth, email, pw); },
     resetPassword(email) { return sendPasswordResetEmail(auth, email); },
+    getIdToken() { return auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null); },
     logout() { return signOut(auth); },
     async getCountries() {
       const s = await getDoc(doc(db, "users", state.uid));
@@ -206,6 +207,7 @@ function demoStore() {
     demo: true,
     initAuth(onChange) { seedDemoData(); onChange({ uid: "demo", email: "Demo mode" }); },
     resetPassword() { return Promise.resolve(); },
+    async getIdToken() { return null; },
     async getCountries() { try { return JSON.parse(localStorage.getItem(LS_COUNTRIES)); } catch { return null; } },
     async setCountries(arr) { localStorage.setItem(LS_COUNTRIES, JSON.stringify(arr)); },
     async getCuisines() { try { return JSON.parse(localStorage.getItem(LS_CUISINES)); } catch { return null; } },
@@ -334,6 +336,7 @@ $("auth-forgot").onclick = async () => {
   $("auth-note").textContent = "";
   const email = $("auth-email").value.trim();
   if (!email) { $("auth-error").textContent = "Enter your email above first, then tap “Forgot password?”."; return; }
+  if (store.demo) { $("auth-error").textContent = "Reset emails only send on the live site, not this preview."; return; }
   const sent = `If an account exists for ${email}, a password-reset link is on its way. Check your inbox (and spam).`;
   try {
     await store.resetPassword(email);
@@ -1038,7 +1041,7 @@ function renderAdminUsers(users) {
     const el = document.createElement("div");
     el.className = "admin-user" + (u.disabled ? " admin-disabled" : "");
     el.innerHTML = `
-      <div class="admin-email">${esc(u.email || "(no email)")}${isSelf ? " · you" : ""}${u.disabled ? ` <span class="admin-tag">Disabled</span>` : ""}</div>
+      <div class="admin-email">${esc(u.email || `User ${String(u.id).slice(0, 8)}… (signs in to show email)`)}${isSelf ? " · you" : ""}${u.disabled ? ` <span class="admin-tag">Disabled</span>` : ""}</div>
       <div class="admin-meta">Joined ${joined} · <span class="${over ? "admin-over" : ""}">${used} / ${limit} lookups this month</span></div>
       <div class="admin-progress"><div style="width:${pct}%;${over ? "background:var(--red)" : ""}"></div></div>
       <div class="admin-limit-row">
@@ -1155,7 +1158,6 @@ async function applyMapLink() {
   if (/^https?:\/\//i.test(raw)) {
     if (store.demo) { setMapStatus("Link lookup runs on the live site. Here, paste coordinates like 3.1456, 101.7089.", true); return; }
     setMapStatus("Reading link…");
-    store.recordApiUse();
     try {
       const res = await fetch(`/api/resolve?url=${encodeURIComponent(raw)}`);
       const data = await res.json();
@@ -1379,6 +1381,20 @@ $("search-go").onclick = runSearch;
 $("search-name").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 $("link-help-btn").onclick = () => $("link-help").classList.toggle("hidden");
 
+// Google-backed lookup via the server proxy (token-verified + usage-enforced).
+async function googleLookup(name, lat, lng) {
+  const idToken = await store.getIdToken();
+  const resp = await fetch("/api/places", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken, name, lat, lng, country: state.activeCountry }),
+  });
+  let data = {}; try { data = await resp.json(); } catch {}
+  return { status: resp.status, data };
+}
+function overLimitMsg(d) {
+  return `You've used all your lookups this month (${d.used}/${d.limit}). Ask the admin to raise your limit.`;
+}
+
 async function runSearch() {
   const name = $("search-name").value.trim();
   if (!name) return;
@@ -1388,17 +1404,31 @@ async function runSearch() {
   if (/^https?:\/\//i.test(name)) {
     if (store.demo) { $("search-status").textContent = "Link lookup runs on the live site. Here, type a name to search."; return; }
     $("search-status").textContent = "Reading the link…";
-    store.recordApiUse();
     try {
       const res = await fetch(`/api/resolve?url=${encodeURIComponent(name)}`);
       const data = await res.json();
       if (data && (data.name || data.lat)) {
-        $("search-status").textContent = "";
-        fillEditForm({
-          name: data.name || "", cuisine: data.cuisine || "", district: data.district || "",
+        const filled = {
+          name: data.name || "", cuisine: "", district: data.district || "",
           address: data.address || "", openingHours: data.openingHours || "", phone: data.phone || "",
           lat: data.lat ?? "", lng: data.lng ?? "",
-        });
+        };
+        // Enrich with Google (hours, address) when we have a name to look up.
+        if (data.name) {
+          const g = await googleLookup(data.name, data.lat, data.lng);
+          if (g.status === 429) { $("search-status").textContent = overLimitMsg(g.data); return; }
+          if (g.status === 403) { $("search-status").textContent = "Your access has been disabled. Contact the admin."; return; }
+          const gp = g.status === 200 && g.data.results && g.data.results[0];
+          if (gp) {
+            filled.address = gp.address || filled.address;
+            filled.openingHours = gp.openingHours || filled.openingHours;
+            filled.phone = gp.phone || filled.phone;
+            if (gp.lat != null) filled.lat = gp.lat;
+            if (gp.lng != null) filled.lng = gp.lng;
+          }
+        }
+        $("search-status").textContent = "";
+        fillEditForm(filled);
       } else {
         $("search-status").innerHTML = (data && data.error) ? esc(data.error) : "Couldn't read that link. You can still <strong>Add it manually</strong> below.";
       }
@@ -1414,10 +1444,17 @@ async function runSearch() {
     if (store.demo) {
       results = mockSearch(name, state.activeCountry);
     } else {
-      store.recordApiUse();
-      const res = await fetch(`/api/search?name=${encodeURIComponent(name)}&country=${encodeURIComponent(state.activeCountry)}`);
-      const data = await res.json();
-      results = data.results || [];
+      // Try Google first (full data incl. hours); fall back to free OSM if it's
+      // not set up or errors. Limit/disabled responses stop here.
+      const g = await googleLookup(name);
+      if (g.status === 429) { $("search-status").textContent = overLimitMsg(g.data); return; }
+      if (g.status === 403) { $("search-status").textContent = "Your access has been disabled. Contact the admin."; return; }
+      if (g.status === 200) {
+        results = g.data.results || [];
+      } else {
+        const res = await fetch(`/api/search?name=${encodeURIComponent(name)}&country=${encodeURIComponent(state.activeCountry)}`);
+        results = (await res.json()).results || [];
+      }
     }
     if (!results.length) {
       $("search-status").innerHTML = `Not found in the map database. Try a different spelling, or tap <strong>“Add it manually”</strong> below to enter it yourself.`;
