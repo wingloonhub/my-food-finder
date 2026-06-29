@@ -43,8 +43,14 @@ config, the live account-backed version takes over automatically.
    rules_version = '2';
    service cloud.firestore {
      match /databases/{database}/documents {
+       // Each user can read/write only their own data.
        match /users/{uid}/{document=**} {
          allow read, write: if request.auth != null && request.auth.uid == uid;
+       }
+       // Admin (you) can read/write every user's profile — powers the Admin dashboard.
+       match /users/{uid} {
+         allow read, write: if request.auth != null
+           && request.auth.token.email == "wingloon@gmail.com";
        }
      }
    }
@@ -81,3 +87,35 @@ and start adding restaurants.
   Google's "popular times" isn't available through any public API.
 - **Distance** uses your device location (you'll be asked for permission).
 - **Map** opens Google Maps at the restaurant's coordinates.
+
+---
+
+## Admin dashboard
+
+When you sign in as **wingloon@gmail.com**, an **Admin** button appears in the top bar.
+It lists every user, their auto-fill lookups used this month, lets you set a
+**monthly limit** per user, and **disable / re-enable** any user. A disabled user is
+bounced to the login screen (with a message) the next time the app loads. Access to
+other users' data is enforced by the admin Firestore rule above — not just the hidden
+button.
+
+> The dashboard *displays and sets* limits. It does **not yet hard-enforce** them —
+> that needs the server piece below.
+
+## Switching to Google data + enforcing limits (next phase)
+
+To auto-pull name/address/hours/location/distance from **Google** (instead of free
+OpenStreetMap) and to actually stop a user exceeding their limit, two things are needed:
+
+1. **Google Cloud:** a project with **billing enabled**, the **Places API** and
+   **Distance Matrix API** turned on, and an **API key**.
+2. **Firebase service account:** Firebase → Project settings → Service accounts →
+   *Generate new private key*. This lets a server function verify who's calling and
+   read/increment their usage securely.
+
+With those, the app gets a new server function (`/api/places`) that: verifies the
+user's Firebase token → checks their usage vs. limit in Firestore → if under, calls
+Google and increments their count → if over, refuses. That's the only way a per-user
+limit can truly protect your Google bill (a browser-only limit can be bypassed).
+
+Tell Claude when you have the Google key + service account and it'll wire this up.

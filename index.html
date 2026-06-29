@@ -55,6 +55,7 @@
       </div>
       <div class="topbar-right">
         <span id="user-email" class="user-email"></span>
+        <button id="btn-admin" class="btn-ghost hidden" type="button" title="Admin">Admin</button>
         <button id="btn-settings" class="btn-ghost" type="button" title="Settings" aria-label="Settings">⚙</button>
         <button id="btn-logout" class="btn-ghost" type="button">Log out</button>
       </div>
@@ -97,6 +98,19 @@
       <div class="modal-actions">
         <button class="btn-ghost" id="share-dismiss" type="button">Dismiss</button>
         <button class="btn-primary" id="share-add" type="button">Add to my list</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ADMIN MODAL ===================== -->
+  <div id="admin-modal" class="modal hidden">
+    <div class="modal-card modal-card-wide">
+      <h2>Admin — Users</h2>
+      <p class="hint">Each user's auto-fill API usage this month, and the monthly limit you allow them. Set a limit and tap Save.</p>
+      <div class="admin-summary" id="admin-summary"></div>
+      <div class="admin-list" id="admin-list"></div>
+      <div class="modal-actions">
+        <button class="btn-primary" data-close-admin type="button">Done</button>
       </div>
     </div>
   </div>

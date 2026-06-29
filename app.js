@@ -5,8 +5,8 @@ import {
   signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, setDoc, getDoc, addDoc,
-  deleteDoc, onSnapshot, serverTimestamp,
+  getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc,
+  deleteDoc, onSnapshot, serverTimestamp, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,7 @@ const state = {
   areaSel: {},          // { country: [area,...] } — selected areas per country, remembered ([] = all)
   cuisine: "",
   search: "",           // free-text search over names + dishes
+  userEmail: "",        // signed-in email (for admin gating)
   cuisines: [],         // managed cuisine list for the dropdown (Settings)
   openOnly: false,      // show only restaurants open right now
   sortByDistance: false,// sort the list nearest-first
@@ -68,7 +69,7 @@ const show = (el) => el.classList.remove("hidden");
 const hide = (el) => el.classList.add("hidden");
 
 // ----- Back button closes the open dialog instead of leaving the app ---------
-const MODAL_IDS = ["detail-modal", "add-modal", "settings-modal", "share-modal", "country-modal"];
+const MODAL_IDS = ["detail-modal", "add-modal", "settings-modal", "share-modal", "country-modal", "admin-modal"];
 let modalHistoryActive = false;
 let suppressPop = false;
 function topOpenModal() {
@@ -112,6 +113,10 @@ const LS_CUISINES = "rt_demo_cuisines";
 const LS_AREASEL = "rt_demo_areasel";
 const LS_RESTAURANTS = "rt_demo_restaurants";
 
+const ADMIN_EMAIL = "wingloon@gmail.com";
+const DEFAULT_API_LIMIT = 200; // auto-fill lookups allowed per user per month
+const apiPeriod = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+
 const DEFAULT_CUISINES = [
   "Malaysian", "Malay", "Chinese", "Indian", "Mamak / Indian", "Japanese",
   "Korean", "Thai", "Western", "Cafe", "Seafood", "Vegetarian", "Fast Food", "Dessert",
@@ -146,6 +151,39 @@ function firebaseStore() {
     async setAreaSel(obj) {
       await setDoc(doc(db, "users", state.uid), { areaSel: obj }, { merge: true });
     },
+    // --- Admin / usage ---
+    async ensureProfile(email) {
+      const ref = doc(db, "users", state.uid);
+      const s = await getDoc(ref);
+      const patch = { email };
+      if (!s.exists() || !s.data().createdAt) patch.createdAt = serverTimestamp();
+      if (!s.exists() || s.data().apiLimit == null) patch.apiLimit = DEFAULT_API_LIMIT;
+      await setDoc(ref, patch, { merge: true });
+    },
+    async recordApiUse() {
+      const ref = doc(db, "users", state.uid);
+      const s = await getDoc(ref);
+      const period = apiPeriod();
+      if (s.exists() && s.data().apiPeriod === period) {
+        await setDoc(ref, { apiUsed: increment(1) }, { merge: true });
+      } else {
+        await setDoc(ref, { apiPeriod: period, apiUsed: 1 }, { merge: true });
+      }
+    },
+    async listUsers() {
+      const qs = await getDocs(collection(db, "users"));
+      return qs.docs.map((d) => ({ id: d.id, ...d.data() }));
+    },
+    async setUserLimit(uid, limit) {
+      await setDoc(doc(db, "users", uid), { apiLimit: limit }, { merge: true });
+    },
+    async setUserDisabled(uid, disabled) {
+      await setDoc(doc(db, "users", uid), { disabled }, { merge: true });
+    },
+    async isDisabled() {
+      const s = await getDoc(doc(db, "users", state.uid));
+      return s.exists() && s.data().disabled === true;
+    },
     subscribe(cb) {
       const col = collection(db, "users", state.uid, "restaurants");
       return onSnapshot(col, (qs) => cb(qs.docs.map((d) => ({ id: d.id, ...d.data() }))));
@@ -174,6 +212,18 @@ function demoStore() {
     async setCuisines(arr) { localStorage.setItem(LS_CUISINES, JSON.stringify(arr)); },
     async getAreaSel() { try { return JSON.parse(localStorage.getItem(LS_AREASEL)); } catch { return null; } },
     async setAreaSel(obj) { localStorage.setItem(LS_AREASEL, JSON.stringify(obj)); },
+    async ensureProfile() {},
+    async recordApiUse() {},
+    async listUsers() {
+      return [
+        { id: "u1", email: "wingloon@gmail.com", apiUsed: 12, apiLimit: 200, apiPeriod: apiPeriod(), createdAt: { seconds: 1717000000 } },
+        { id: "u2", email: "friend.one@gmail.com", apiUsed: 47, apiLimit: 50, apiPeriod: apiPeriod(), createdAt: { seconds: 1718000000 } },
+        { id: "u3", email: "heavy.user@example.com", apiUsed: 215, apiLimit: 200, apiPeriod: apiPeriod(), createdAt: { seconds: 1719000000 }, disabled: true },
+      ];
+    },
+    async setUserLimit() {},
+    async setUserDisabled() {},
+    async isDisabled() { return false; },
     subscribe(c) { cb = c; cb(read()); return () => { cb = null; }; },
     async add(data) {
       const arr = read();
@@ -323,12 +373,23 @@ $("btn-logout").onclick = () => store.logout();
 
 // Bootstrap: wire auth state to the UI. In demo mode this fires immediately
 // with a fake user; in production it follows real Firebase sign-in/out.
-store.initAuth((user) => {
+store.initAuth(async (user) => {
   if (user) {
     state.uid = user.uid;
+    state.userEmail = user.email || "";
+    await store.ensureProfile(state.userEmail);
+    // Blocked users get bounced back to the login screen.
+    if (await store.isDisabled()) {
+      hide($("app-screen"));
+      show($("auth-screen"));
+      $("auth-error").textContent = "Your access has been disabled. Please contact the admin.";
+      await store.logout();
+      return;
+    }
     $("user-email").textContent = user.email;
     $("demo-banner").classList.toggle("hidden", !store.demo);
     $("btn-logout").classList.toggle("hidden", store.demo);
+    $("btn-admin").classList.toggle("hidden", !isAdmin());
     hide($("auth-screen"));
     show($("app-screen"));
     startSync();
@@ -940,6 +1001,76 @@ $("country-save").onclick = async () => {
 document.querySelectorAll("[data-close-country]").forEach((b) => b.onclick = () => dismissModal($("country-modal")));
 
 // ===========================================================================
+// ADMIN — track users + set per-user API limits (gated to ADMIN_EMAIL)
+// ===========================================================================
+function isAdmin() {
+  return state.userEmail === ADMIN_EMAIL ||
+    (store.demo && new URLSearchParams(location.search).get("admin") === "1");
+}
+
+$("btn-admin").onclick = openAdmin;
+async function openAdmin() {
+  showModal($("admin-modal"));
+  $("admin-summary").textContent = "Loading users…";
+  $("admin-list").innerHTML = "";
+  let users = [];
+  try { users = await store.listUsers(); }
+  catch { $("admin-summary").innerHTML = `<span class="admin-over">Couldn't load users — check the admin Firestore rule is published.</span>`; return; }
+  renderAdminUsers(users);
+}
+
+function renderAdminUsers(users) {
+  users.sort((a, b) => (b.apiUsed || 0) - (a.apiUsed || 0));
+  const period = apiPeriod();
+  const overCount = users.filter((u) => (u.apiUsed || 0) >= (u.apiLimit ?? DEFAULT_API_LIMIT)).length;
+  $("admin-summary").innerHTML = `${users.length} user${users.length === 1 ? "" : "s"} · usage shown for ${period}` +
+    (overCount ? ` · <span class="admin-over">${overCount} at/over limit</span>` : "");
+  const wrap = $("admin-list");
+  wrap.innerHTML = "";
+  for (const u of users) {
+    const used = u.apiUsed || 0;
+    const limit = u.apiLimit ?? DEFAULT_API_LIMIT;
+    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    const joined = u.createdAt && u.createdAt.seconds
+      ? new Date(u.createdAt.seconds * 1000).toLocaleDateString() : "—";
+    const over = used >= limit;
+    const isSelf = u.email === ADMIN_EMAIL;
+    const el = document.createElement("div");
+    el.className = "admin-user" + (u.disabled ? " admin-disabled" : "");
+    el.innerHTML = `
+      <div class="admin-email">${esc(u.email || "(no email)")}${isSelf ? " · you" : ""}${u.disabled ? ` <span class="admin-tag">Disabled</span>` : ""}</div>
+      <div class="admin-meta">Joined ${joined} · <span class="${over ? "admin-over" : ""}">${used} / ${limit} lookups this month</span></div>
+      <div class="admin-progress"><div style="width:${pct}%;${over ? "background:var(--red)" : ""}"></div></div>
+      <div class="admin-limit-row">
+        <label>Monthly limit</label>
+        <input type="number" min="0" class="admin-limit-input" value="${limit}" />
+        <button class="btn-primary admin-save" type="button">Save</button>
+      </div>
+      ${isSelf ? "" : `<button class="admin-toggle ${u.disabled ? "is-enable" : "is-disable"}" type="button">${u.disabled ? "Enable user" : "Disable user"}</button>`}`;
+    el.querySelector(".admin-save").onclick = async () => {
+      const val = parseInt(el.querySelector(".admin-limit-input").value, 10);
+      if (!Number.isFinite(val) || val < 0) return;
+      const btn = el.querySelector(".admin-save");
+      btn.textContent = "Saving…";
+      try { await store.setUserLimit(u.id, val); btn.textContent = "Saved ✓"; u.apiLimit = val; }
+      catch { btn.textContent = "Failed"; }
+      setTimeout(() => { btn.textContent = "Save"; }, 1500);
+    };
+    const toggle = el.querySelector(".admin-toggle");
+    if (toggle) toggle.onclick = async () => {
+      const next = !u.disabled;
+      if (next && !confirm(`Disable ${u.email}? They'll be blocked from the app.`)) return;
+      toggle.textContent = "…";
+      try { await store.setUserDisabled(u.id, next); u.disabled = next; renderAdminUsers(users); }
+      catch { toggle.textContent = "Failed"; }
+    };
+    wrap.appendChild(el);
+  }
+}
+document.querySelectorAll("[data-close-admin]").forEach((b) => b.onclick = () => dismissModal($("admin-modal")));
+$("admin-modal").addEventListener("click", (e) => { if (e.target.id === "admin-modal") dismissModal($("admin-modal")); });
+
+// ===========================================================================
 // SETTINGS — manage the cuisine dropdown list
 // ===========================================================================
 $("btn-settings").onclick = () => { renderCuisineEditor(); showModal($("settings-modal")); };
@@ -1024,6 +1155,7 @@ async function applyMapLink() {
   if (/^https?:\/\//i.test(raw)) {
     if (store.demo) { setMapStatus("Link lookup runs on the live site. Here, paste coordinates like 3.1456, 101.7089.", true); return; }
     setMapStatus("Reading link…");
+    store.recordApiUse();
     try {
       const res = await fetch(`/api/resolve?url=${encodeURIComponent(raw)}`);
       const data = await res.json();
@@ -1256,6 +1388,7 @@ async function runSearch() {
   if (/^https?:\/\//i.test(name)) {
     if (store.demo) { $("search-status").textContent = "Link lookup runs on the live site. Here, type a name to search."; return; }
     $("search-status").textContent = "Reading the link…";
+    store.recordApiUse();
     try {
       const res = await fetch(`/api/resolve?url=${encodeURIComponent(name)}`);
       const data = await res.json();
@@ -1281,6 +1414,7 @@ async function runSearch() {
     if (store.demo) {
       results = mockSearch(name, state.activeCountry);
     } else {
+      store.recordApiUse();
       const res = await fetch(`/api/search?name=${encodeURIComponent(name)}&country=${encodeURIComponent(state.activeCountry)}`);
       const data = await res.json();
       results = data.results || [];

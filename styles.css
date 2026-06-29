@@ -144,6 +144,28 @@ input, select, button { font-family: inherit; font-size: 1rem; }
 }
 .btn-add { flex: 0 0 auto; }
 
+/* ---------------- Admin ---------------- */
+.admin-summary { color: var(--muted); font-size: .85rem; margin: 4px 0 14px; }
+.admin-list { display: flex; flex-direction: column; gap: 10px; max-height: 56vh; overflow-y: auto; }
+.admin-user {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+}
+.admin-email { font-weight: 600; font-size: .92rem; word-break: break-all; }
+.admin-meta { color: var(--muted); font-size: .8rem; margin: 4px 0 10px; }
+.admin-over { color: var(--red); font-weight: 600; }
+.admin-limit-row { display: flex; align-items: center; gap: 8px; }
+.admin-limit-row label { color: var(--muted); font-size: .82rem; flex: 0 0 auto; }
+.admin-limit-row input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 8px; outline: none; }
+.admin-limit-row input:focus { border-color: var(--accent); }
+.admin-limit-row button { flex: 0 0 auto; }
+.admin-progress { height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.admin-progress > div { height: 100%; background: var(--accent); }
+.admin-user.admin-disabled { opacity: .65; }
+.admin-tag { background: rgba(240,85,107,.15); color: var(--red); font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
+.admin-toggle { width: 100%; margin-top: 10px; border-radius: 9px; padding: 9px; cursor: pointer; font-weight: 600; }
+.admin-toggle.is-disable { background: transparent; border: 1px solid var(--red); color: var(--red); }
+.admin-toggle.is-enable { background: transparent; border: 1px solid var(--green); color: var(--green); }
+
 /* ---------------- Search bar ---------------- */
 .search-bar { padding: 2px 18px 8px; }
 .search-bar input {
