@@ -1,25 +1,44 @@
 // Vercel serverless function: POST /api/places
-// Google-backed restaurant lookup with per-user enforcement.
-//   1. Verifies the caller's Firebase ID token (who they are).
-//   2. Checks their monthly usage vs. limit + that they aren't disabled.
-//   3. If OK -> calls Google Places (New) for name/address/hours/location,
-//      and increments their usage. If over limit -> refuses (protects your bill).
+// Google-backed restaurant lookup (name/address/opening hours/location).
 //
-// Needs two Vercel environment variables:
-//   GOOGLE_PLACES_KEY        — your Google Maps Platform API key
-//   FIREBASE_SERVICE_ACCOUNT — the full contents of the service-account .json
+// Confirms the caller is a logged-in user of THIS Firebase project by verifying
+// their Firebase ID token against Google's public certificates — NO downloadable
+// service-account key required (works under org policies that block key creation).
+//
+// Bill protection is handled at the Google level (a daily quota cap on the Places
+// API) + your budget alert. Per-user counts are tracked client-side for the admin
+// dashboard.
+//
+// Needs ONE Vercel environment variable:
+//   GOOGLE_PLACES_KEY — your Google Maps Platform API key (Places + Distance Matrix)
 
-import admin from "firebase-admin";
+import jwt from "jsonwebtoken";
 
-function getAdmin() {
-  if (!admin.apps.length) {
-    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({ credential: admin.credential.cert(sa) });
-  }
-  return admin;
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "my-food-finder-cf1c3";
+const CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
+
+let certsCache = null, certsExpiry = 0;
+async function getCerts() {
+  if (certsCache && Date.now() < certsExpiry) return certsCache;
+  const r = await fetch(CERTS_URL);
+  certsCache = await r.json();
+  certsExpiry = Date.now() + 60 * 60 * 1000; // refresh hourly
+  return certsCache;
 }
 
-const ymPeriod = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+async function verifyFirebaseToken(token) {
+  const decoded = jwt.decode(token, { complete: true });
+  if (!decoded || !decoded.header || !decoded.header.kid) throw new Error("malformed token");
+  const certs = await getCerts();
+  const cert = certs[decoded.header.kid];
+  if (!cert) throw new Error("no matching key");
+  return jwt.verify(token, cert, {
+    algorithms: ["RS256"],
+    audience: PROJECT_ID,
+    issuer: `https://securetoken.google.com/${PROJECT_ID}`,
+  });
+}
+
 const DAY_CODE = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]; // Google: 0 = Sunday
 const DAY_ORDER = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
@@ -33,7 +52,7 @@ function hoursFromGoogle(oh) {
     const from = `${String(p.open.hour ?? 0).padStart(2, "0")}:${String(p.open.minute ?? 0).padStart(2, "0")}`;
     const to = p.close
       ? `${String(p.close.hour ?? 0).padStart(2, "0")}:${String(p.close.minute ?? 0).padStart(2, "0")}`
-      : "23:59"; // open 24h / no close
+      : "23:59";
     (byDay[code] = byDay[code] || []).push(`${from}-${to}`);
   }
   return DAY_ORDER.filter((c) => byDay[c]).map((c) => `${c} ${byDay[c].join(",")}`).join("; ");
@@ -51,27 +70,15 @@ export default async function handler(req, res) {
   const { idToken, name, lat, lng, country } = await readBody(req);
   if (!idToken || !name) { res.status(400).json({ error: "Missing token or name." }); return; }
 
-  let decoded;
   try {
-    decoded = await getAdmin().auth().verifyIdToken(idToken);
+    await verifyFirebaseToken(idToken);
   } catch {
     res.status(401).json({ error: "auth_failed" }); return;
   }
 
-  const db = getAdmin().firestore();
-  const ref = db.doc(`users/${decoded.uid}`);
-  let data = {};
-  try { const s = await ref.get(); data = s.exists ? s.data() : {}; } catch {}
-
-  if (data.disabled) { res.status(403).json({ error: "disabled" }); return; }
-  const period = ymPeriod();
-  const used = data.apiPeriod === period ? (data.apiUsed || 0) : 0;
-  const limit = data.apiLimit ?? 200;
-  if (used >= limit) { res.status(429).json({ error: "over_limit", used, limit }); return; }
-
-  // --- Google Places (New) text search ---
   const body = { textQuery: country ? `${name}, ${country}` : name, languageCode: "en" };
   if (lat && lng) body.locationBias = { circle: { center: { latitude: +lat, longitude: +lng }, radius: 5000 } };
+
   let gd;
   try {
     const gr = await fetch("https://places.googleapis.com/v1/places:searchText", {
@@ -85,7 +92,7 @@ export default async function handler(req, res) {
     });
     gd = await gr.json();
     if (!gr.ok) { res.status(502).json({ error: "google_error", detail: gd.error && gd.error.message }); return; }
-  } catch (e) {
+  } catch {
     res.status(502).json({ error: "google_unreachable" }); return;
   }
 
@@ -98,15 +105,6 @@ export default async function handler(req, res) {
     rating: p.rating ?? null,
     phone: p.nationalPhoneNumber || "",
   }));
-
-  // Count this lookup against the user's monthly limit.
-  try {
-    await ref.set({
-      apiPeriod: period,
-      apiUsed: data.apiPeriod === period ? used + 1 : 1,
-      email: decoded.email || data.email || "",
-    }, { merge: true });
-  } catch {}
 
   res.status(200).json({ results });
 }

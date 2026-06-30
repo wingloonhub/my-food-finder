@@ -1,6 +1,6 @@
 {
   "type": "module",
   "dependencies": {
-    "firebase-admin": "^12.7.0"
+    "jsonwebtoken": "^9.0.2"
   }
 }

@@ -1389,6 +1389,7 @@ async function googleLookup(name, lat, lng) {
     body: JSON.stringify({ idToken, name, lat, lng, country: state.activeCountry }),
   });
   let data = {}; try { data = await resp.json(); } catch {}
+  if (resp.status === 200) store.recordApiUse(); // soft per-user tally for the admin dashboard
   return { status: resp.status, data };
 }
 function overLimitMsg(d) {
@@ -1441,6 +1442,7 @@ async function runSearch() {
   $("search-status").textContent = "Searching…";
   try {
     let results;
+    let googleNote = "";
     if (store.demo) {
       results = mockSearch(name, state.activeCountry);
     } else {
@@ -1452,15 +1454,18 @@ async function runSearch() {
       if (g.status === 200) {
         results = g.data.results || [];
       } else {
+        // Surface why Google failed (so we can diagnose), then fall back to OSM.
+        const why = (g.data && (g.data.detail || g.data.error)) || `status ${g.status}`;
+        googleNote = `⚠️ Google lookup failed (${why}) — showing basic info without hours.`;
         const res = await fetch(`/api/search?name=${encodeURIComponent(name)}&country=${encodeURIComponent(state.activeCountry)}`);
         results = (await res.json()).results || [];
       }
     }
     if (!results.length) {
-      $("search-status").innerHTML = `Not found in the map database. Try a different spelling, or tap <strong>“Add it manually”</strong> below to enter it yourself.`;
+      $("search-status").innerHTML = (googleNote ? esc(googleNote) + " " : "") + `Not found. Try a different spelling, or tap <strong>“Add it manually”</strong> below.`;
       return;
     }
-    $("search-status").textContent = `${results.length} match${results.length > 1 ? "es" : ""} — pick one:`;
+    $("search-status").textContent = googleNote || `${results.length} match${results.length > 1 ? "es" : ""} — pick one:`;
     const ul = $("search-results");
     results.forEach((r) => {
       const li = document.createElement("li");
