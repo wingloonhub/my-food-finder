@@ -58,6 +58,18 @@ function hoursFromGoogle(oh) {
   return DAY_ORDER.filter((c) => byDay[c]).map((c) => `${c} ${byDay[c].join(",")}`).join("; ");
 }
 
+// Pick a sensible "state / district" from Google's address components
+// (prefer city/town level, then sub-area, then state).
+function districtFromComponents(comps) {
+  if (!Array.isArray(comps)) return "";
+  const pick = (type) => {
+    const c = comps.find((x) => Array.isArray(x.types) && x.types.includes(type));
+    return c ? (c.longText || c.shortText || "") : "";
+  };
+  return pick("locality") || pick("administrative_area_level_2") ||
+    pick("sublocality") || pick("postal_town") || pick("administrative_area_level_1") || "";
+}
+
 async function readBody(req) {
   if (req.body && typeof req.body === "object") return req.body;
   let raw = "";
@@ -86,7 +98,7 @@ export default async function handler(req, res) {
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": process.env.GOOGLE_PLACES_KEY,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.regularOpeningHours,places.rating,places.nationalPhoneNumber",
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.regularOpeningHours,places.rating,places.nationalPhoneNumber",
       },
       body: JSON.stringify(body),
     });
@@ -99,6 +111,7 @@ export default async function handler(req, res) {
   const results = (gd.places || []).slice(0, 6).map((p) => ({
     name: (p.displayName && p.displayName.text) || name,
     address: p.formattedAddress || "",
+    district: districtFromComponents(p.addressComponents),
     lat: p.location ? p.location.latitude : null,
     lng: p.location ? p.location.longitude : null,
     openingHours: hoursFromGoogle(p.regularOpeningHours),

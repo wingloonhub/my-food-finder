@@ -1422,6 +1422,7 @@ async function runSearch() {
           const gp = g.status === 200 && g.data.results && g.data.results[0];
           if (gp) {
             filled.address = gp.address || filled.address;
+            filled.district = gp.district || filled.district;
             filled.openingHours = gp.openingHours || filled.openingHours;
             filled.phone = gp.phone || filled.phone;
             if (gp.lat != null) filled.lat = gp.lat;
